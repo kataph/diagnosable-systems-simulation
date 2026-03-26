@@ -1,0 +1,185 @@
+from __future__ import annotations
+
+from diagnosable_systems_simulation.actions.base import Action, ActionCost, ActionResult
+from diagnosable_systems_simulation.actions.preconditions import (
+    AffordanceRequirement, PreconditionChecker
+)
+from diagnosable_systems_simulation.world.affordances import Affordance
+
+
+class DisconnectCable(Action):
+    """
+    Physically detach a cable from the circuit.
+
+    The cable's ports become floating (node_id = None).
+    DETACHABLE affordance is replaced with RECONNECTABLE.
+
+    targets: {"cable": <Cable component>}
+    port_names: ports to disconnect; None means all ports.
+    """
+
+    action_id = "disconnect_cable"
+    description = "Detach a cable's connector from the circuit."
+    cost = ActionCost(time=40.0)
+    mutates_graph = True
+
+    def __init__(self, port_names: list[str] | None = None):
+        self.port_names = port_names
+
+    def check_preconditions(self, targets, context):
+        ok, failures = PreconditionChecker.check_all(
+            [AffordanceRequirement("subject", Affordance.DETACHABLE)],
+            targets, context,
+        )
+        return ok, "; ".join(failures)
+
+    def execute(self, targets, graph, context, last_result):
+        cable = targets["subject"]
+        ports = self.port_names or [p.name for p in cable.ports]
+        disconnected = [
+            p for p in ports
+            if cable.port(p).node_id is not None
+            and graph.disconnect_port(cable.component_id, p) is not None
+        ]
+        cable.affordances.remove(Affordance.DETACHABLE)
+        cable.affordances.add(Affordance.RECONNECTABLE)
+        return ActionResult(message=f"Disconnected ports {disconnected} of {cable.display_name!r}.")
+
+
+class ReconnectCable(Action):
+    """
+    Reconnect a previously detached cable.
+
+    targets: {"cable": <Cable>}
+    connections: port name -> node_id
+    """
+
+    action_id = "reconnect_cable"
+    description = "Reconnect a detached cable to specified nodes."
+    cost = ActionCost(time=40.0)
+    mutates_graph = True
+
+    def __init__(self, connections: dict[str, str]):
+        self.connections = connections
+
+    def check_preconditions(self, targets, context):
+        ok, failures = PreconditionChecker.check_all(
+            [AffordanceRequirement("subject", Affordance.RECONNECTABLE)],
+            targets, context,
+        )
+        return ok, "; ".join(failures)
+
+    def execute(self, targets, graph, context, last_result):
+        cable = targets["subject"]
+        for port_name, node_id in self.connections.items():
+            graph.reconnect_port(cable.component_id, port_name, node_id)
+        cable.affordances.remove(Affordance.RECONNECTABLE)
+        cable.affordances.add(Affordance.DETACHABLE)
+        return ActionResult(message=f"Reconnected {cable.display_name!r}: {self.connections}.")
+
+
+class ShortCircuit(Action):
+    """
+    Create a short between two nodes (fault injection).
+
+    targets: {} (no component targets — acts on nodes directly)
+    """
+
+    action_id = "short_circuit"
+    description = "Insert a short circuit between two nodes."
+    cost = ActionCost(time=40.0)
+    mutates_graph = True
+
+    def __init__(self, node_a: str, node_b: str, short_id: str):
+        self.node_a = node_a
+        self.node_b = node_b
+        self.short_id = short_id
+
+    def check_preconditions(self, targets, context):
+        return True, ""
+
+    def execute(self, targets, graph, context, last_result):
+        graph.short_nodes(self.node_a, self.node_b, self.short_id)
+        return ActionResult(message=f"Shorted nodes {self.node_a!r} and {self.node_b!r}.")
+
+
+class DegradeComponent(Action):
+    """
+    Apply a parameter degradation to a component (fault injection).
+
+    Stores a fault overlay on the component; no topology change.
+
+    targets: {"subject": <any Component>}
+    degradation: dict of parameter overrides, e.g. {"resistance": 1e9}
+    """
+
+    action_id = "degrade_component"
+    description = "Degrade one or more electrical parameters of a component."
+    cost = ActionCost(time=40.0)
+    mutates_graph = True
+
+    def __init__(self, degradation: dict):
+        self.degradation = degradation
+
+    def check_preconditions(self, targets, context):
+        if "subject" not in targets:
+            return False, "No 'subject' target provided."
+        return True, ""
+
+    def execute(self, targets, graph, context, last_result):
+        comp = targets["subject"]
+        comp.apply_fault(self.degradation)
+        return ActionResult(
+            message=f"Applied fault overlay {self.degradation} to {comp.display_name!r}.",
+        )
+
+
+class BlowFuse(Action):
+    """
+    Blow a fuse (fault injection).
+
+    targets: {"fuse": <Fuse component>}
+    """
+
+    action_id = "blow_fuse"
+    description = "Blow a fuse, making it an open circuit."
+    cost = ActionCost(time=40.0)
+    mutates_graph = True
+
+    def check_preconditions(self, targets, context):
+        if "subject" not in targets:
+            return False, "No 'fuse' target provided."
+        return True, ""
+
+    def execute(self, targets, graph, context, last_result):
+        from diagnosable_systems_simulation.world.components import Fuse
+        fuse: Fuse = targets["subject"]  # type: ignore[assignment]
+        fuse.is_blown = True
+        return ActionResult(message=f"Fuse {fuse.display_name!r} is now blown.")
+
+
+class ForceSwitch(Action):
+    """
+    Force a switch open or closed (fault injection — bypasses normal toggle).
+
+    targets: {"switch": <Switch component>}
+    """
+
+    action_id = "force_switch"
+    description = "Force a switch to a specific position as a fault."
+    cost = ActionCost(time=40.0)
+    mutates_graph = True
+
+    def __init__(self, is_closed: bool):
+        self.is_closed = is_closed
+
+    def check_preconditions(self, targets, context):
+        if "subject" not in targets:
+            return False, "No 'switch' target provided."
+        return True, ""
+
+    def execute(self, targets, graph, context, last_result):
+        sw = targets["subject"]
+        sw.apply_fault({"is_closed": self.is_closed})
+        state = "closed" if self.is_closed else "open"
+        return ActionResult(message=f"Switch {sw.display_name!r} forced {state}.")

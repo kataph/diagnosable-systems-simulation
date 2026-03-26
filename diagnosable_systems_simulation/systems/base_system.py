@@ -1,0 +1,208 @@
+from __future__ import annotations
+
+from typing import Optional
+
+from diagnosable_systems_simulation.actions.base import Action, ActionResult
+from diagnosable_systems_simulation.electrical_simulation.circuit import CircuitGraph
+from diagnosable_systems_simulation.electrical_simulation.results import SimulationResult
+from diagnosable_systems_simulation.electrical_simulation.solver import SimulationRunner
+from diagnosable_systems_simulation.world.affordances import Affordance
+from diagnosable_systems_simulation.world.components import Component
+from diagnosable_systems_simulation.world.context import WorldContext
+from diagnosable_systems_simulation.world.knowledge_graph import (
+    EntityType, RelationType, SystemGraph,
+)
+
+def build_circuit_from_kg(kg: SystemGraph) -> CircuitGraph:
+    """
+    Derive a ``CircuitGraph`` from the nominal wiring in the KG.
+
+    Uses union-find over ELECTRICALLY_CONNECTED edges to group ports into
+    nets, then assigns each net a synthetic node ID (``"gnd"`` for the net
+    marked ``is_ground=True``, ``"net_<i>"`` for all others).
+    """
+    ec_edges = kg.edges_of_relation(RelationType.ELECTRICALLY_CONNECTED)
+
+    # --- Union-Find ---------------------------------------------------
+    parent: dict = {}
+
+    def find(x):
+        parent.setdefault(x, x)
+        if parent[x] != x:
+            parent[x] = find(parent[x])
+        return parent[x]
+
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[rb] = ra
+
+    ground_ports: list = []
+
+    for e in ec_edges:
+        a = (e.from_id, e.attrs["from_port"])
+        b = (e.to_id,   e.attrs["to_port"])
+        union(a, b)
+        if e.attrs.get("is_ground"):
+            ground_ports.append(a)
+
+    # --- Assign node IDs after all unions are done --------------------
+    ground_roots = {find(p) for p in ground_ports}
+    node_ids: dict = {}
+    counter = 0
+
+    def node_id_for(port_key):
+        nonlocal counter
+        root = find(port_key)
+        if root not in node_ids:
+            if root in ground_roots:
+                node_ids[root] = "gnd"
+            else:
+                node_ids[root] = f"net_{counter}"
+                counter += 1
+        return node_ids[root]
+
+    # --- Build port → node_id map per component -----------------------
+    port_map: dict[str, dict[str, str]] = {}
+    for e in ec_edges:
+        a = (e.from_id, e.attrs["from_port"])
+        b = (e.to_id,   e.attrs["to_port"])
+        port_map.setdefault(e.from_id, {})[e.attrs["from_port"]] = node_id_for(a)
+        port_map.setdefault(e.to_id,   {})[e.attrs["to_port"]]   = node_id_for(b)
+
+    # --- Populate CircuitGraph ----------------------------------------
+    g = CircuitGraph()
+    for node_id in dict.fromkeys(node_ids.values()):   # preserve insertion order
+        g.add_node(node_id, is_ground=(node_id == "gnd"))
+
+    for cid, pmap in port_map.items():
+        g.add_component(kg.get_entity(cid), pmap)
+
+    return g
+
+class DiagnosableSystem:
+    """
+    Top-level assembly.  Coordinates all four layers.
+
+    Primary data structures
+    -----------------------
+    kg : SystemGraph
+        The system's knowledge graph.  Holds all entities (components,
+        modules) and structural relations (PART_OF, CONTAINED_IN,
+        ELECTRICALLY_CONNECTED).
+
+    context : WorldContext
+        Dynamic world state: tools available, inverted enclosures, open
+        peepholes, etc.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        kg: SystemGraph,
+        context: WorldContext,
+        runner: SimulationRunner,
+    ):
+        self.name = name
+        self._kg = kg
+        self._graph = build_circuit_from_kg(kg)
+        self._context = context
+        self._runner = runner
+        self._last_result: Optional[SimulationResult] = None
+
+    # ------------------------------------------------------------------
+    # Simulation
+    # ------------------------------------------------------------------
+
+    def simulate(self) -> SimulationResult:
+        self._last_result = self._runner.run(self._graph, self._context)
+        return self._last_result
+
+    @property
+    def last_result(self) -> Optional[SimulationResult]:
+        return self._last_result
+
+    # ------------------------------------------------------------------
+    # Action dispatch
+    # ------------------------------------------------------------------
+
+    def apply_action(self, action: Action, targets: dict[str, Component]) -> ActionResult:
+        ok, reason = action.check_preconditions(targets, self._context)
+        if not ok:
+            return ActionResult(success=False, message=reason)
+        if self._last_result is None:
+            self.simulate()
+        result = action.execute(targets, self._graph, self._context, self._last_result)
+        if action.mutates_graph:
+            self._last_result = self._runner.run(self._graph, self._context)
+            if result.observation is not None:
+                result.observation.simulation_snapshot = self._last_result
+        return result
+
+    def inject_fault(self, fault_action: Action, targets: dict[str, Component]) -> ActionResult:
+        return self.apply_action(fault_action, targets)
+
+    # ------------------------------------------------------------------
+    # Entity access (components & modules via the knowledge graph)
+    # ------------------------------------------------------------------
+
+    def component(self, component_id: str) -> Component:
+        try:
+            return self._kg.get_entity(component_id)
+        except KeyError:
+            raise KeyError(f"No component {component_id!r} in system {self.name!r}.")
+
+    def all_components(self) -> dict[str, Component]:
+        return self._kg.entities_of_type(EntityType.COMPONENT)
+
+    def module_display_name(self, module_id: str) -> str:
+        """Return the display name of a module (enclosure acting as module anchor)."""
+        return self.component(module_id).display_name
+
+    def all_modules(self) -> dict[str, str]:
+        """Return {module_id: display_name} for all components that have PART_OF edges."""
+        module_ids = {e.to_id for e in self._kg.edges_of_relation(RelationType.PART_OF)}
+        return {mid: self._kg.get_entity(mid).display_name for mid in module_ids}
+
+    def parts_of_module(self, module_id: str) -> list[Component]:
+        """All components that are PART_OF the given module."""
+        return [
+            self._kg.get_entity(e.from_id)
+            for e in self._kg.incoming(module_id, RelationType.PART_OF)
+        ]
+
+    def contained_in(self, enclosure_id: str) -> list[Component]:
+        """All components physically CONTAINED_IN the given enclosure."""
+        return [
+            self._kg.get_entity(e.from_id)
+            for e in self._kg.incoming(enclosure_id, RelationType.CONTAINED_IN)
+        ]
+
+    def get_affordances(self, component_id: str) -> set[Affordance]:
+        comp = self.component(component_id)
+        return comp.affordances.all_active(comp, self._context)
+
+    @property
+    def kg(self) -> SystemGraph:
+        return self._kg
+
+    @property
+    def context(self) -> WorldContext:
+        return self._context
+
+    @property
+    def graph(self) -> CircuitGraph:
+        return self._graph
+
+    # ------------------------------------------------------------------
+    # Repr
+    # ------------------------------------------------------------------
+
+    def __repr__(self) -> str:
+        comps = len(self._kg.entities_of_type(EntityType.COMPONENT))
+        mods  = len(self.all_modules())
+        return (
+            f"DiagnosableSystem({self.name!r}, "
+            f"components={comps}, modules={mods}, "
+            f"simulated={self._last_result is not None})"
+        )
