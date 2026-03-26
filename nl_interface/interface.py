@@ -189,10 +189,10 @@ def _execute(entries: list[dict], system) -> list[tuple]:
 # Step 3: verbalize
 # ---------------------------------------------------------------------------
 
-def _verbalize(results: list[tuple]) -> str:
+def _verbalize(results: list[tuple], original_text: str) -> str:
     lines = []
     for action, result in results:
-        lines.append(f"action: {action.action_id}, success: {result.success}, message: {result.message}")
+        lines.append(f"action_id: {action.action_id}, action_description: {original_text}, success: {result.success}, message: {result.message}")
         if result.observation:
             for p in result.observation.properties:
                 unit = f" {p.unit}" if p.unit else ""
@@ -229,4 +229,4 @@ def run(text: str, system: DiagnosableSystem) -> tuple[str, ActionCost]:
         },
     )
 
-    return _verbalize(results), total
+    return _verbalize(rsults=results, original_text=text), total
