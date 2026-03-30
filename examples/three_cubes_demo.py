@@ -11,7 +11,7 @@ BACKEND = PySpiceBackend()
 
 from diagnosable_systems_simulation.systems.three_cubes.factory import build_three_cubes_system
 from diagnosable_systems_simulation.actions.diagnostic_actions import (
-    ObserveComponent, MeasureVoltage, ToggleSwitch,
+    CloseSwitch, ObserveComponent, MeasureVoltage, OpenSwitch,
     InvertEnclosure, OpenPeephole,
 )
 from diagnosable_systems_simulation.actions.fault_actions import DisconnectCable, ReconnectCable, DegradeComponent, ForceSwitch
@@ -107,11 +107,11 @@ r = system.apply_action(
 )
 show(r)
 
-# ── Toggle the switch (opens it) ─────────────────────────────────────────────
+# ── Open the switch ───────────────────────────────────────────────────────────
 
-separator("Toggle control switch → open")
+separator("Open control switch")
 r = system.apply_action(
-    ToggleSwitch(),
+    OpenSwitch(),
     {"subject": system.component("ctrl_switch")},
 )
 show(r)

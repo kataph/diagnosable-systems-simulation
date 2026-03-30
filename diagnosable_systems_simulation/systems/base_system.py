@@ -114,6 +114,9 @@ class DiagnosableSystem:
     # Simulation
     # ------------------------------------------------------------------
 
+    def add_logger(self, logger: Logger) -> None:
+        self._runner.logger = logger
+    
     def simulate(self) -> SimulationResult:
         self._last_result = self._runner.run(self._graph, self._context)
         return self._last_result
@@ -193,6 +196,164 @@ class DiagnosableSystem:
     @property
     def graph(self) -> CircuitGraph:
         return self._graph
+
+    # ------------------------------------------------------------------
+    # State snapshot / restore  (used by hypothesis verification)
+    # ------------------------------------------------------------------
+
+    # Component attributes that hold mutable non-overlay state.
+    _STATEFUL_ATTRS: tuple[str, ...] = ("is_closed", "is_inverted", "is_open", "is_blown")
+
+    def snapshot(self) -> dict:
+        """
+        Capture the full mutable state of the circuit:
+        port connections, fault overlays, component state flags,
+        cable _orig_connections, and static affordances.
+        """
+        comps = self.all_components()
+        return {
+            "port_connections": {
+                cid: {p.name: p.node_id for p in c.ports}
+                for cid, c in comps.items()
+            },
+            "fault_overlays": {
+                cid: dict(c._fault_overlay)
+                for cid, c in comps.items()
+            },
+            "component_states": {
+                cid: {
+                    attr: getattr(c, attr)
+                    for attr in self._STATEFUL_ATTRS
+                    if hasattr(c, attr)
+                }
+                for cid, c in comps.items()
+            },
+            "orig_connections": {
+                cid: dict(c._orig_connections)
+                for cid, c in comps.items()
+                if hasattr(c, "_orig_connections")
+            },
+            "static_affordances": {
+                cid: set(c.affordances._static)
+                for cid, c in comps.items()
+            },
+        }
+
+    def restore_snapshot(self, snap: dict, exclude_ids: "set[str] | None" = None) -> None:
+        """
+        Restore the circuit to a previously snapshotted state.
+
+        Components whose IDs appear in *exclude_ids* are left untouched
+        (they have been intentionally repaired and should stay fixed).
+        Re-runs the simulation at the end so results are up to date.
+        """
+        exclude = exclude_ids or set()
+        for cid, comp in self.all_components().items():
+            if cid in exclude:
+                continue
+
+            # --- Port connections ----------------------------------------
+            snap_ports = snap["port_connections"].get(cid, {})
+            for p in comp.ports:
+                snap_node = snap_ports.get(p.name)
+                curr_node = p.node_id
+                if snap_node == curr_node:
+                    continue
+                if curr_node is not None:
+                    self._graph.disconnect_port(cid, p.name)
+                if snap_node is not None:
+                    self._graph.reconnect_port(cid, p.name, snap_node)
+
+            # --- Fault overlays ------------------------------------------
+            comp._fault_overlay.clear()
+            comp._fault_overlay.update(snap["fault_overlays"].get(cid, {}))
+
+            # --- Stateful attributes (is_closed, is_inverted, …) ---------
+            for attr, val in snap["component_states"].get(cid, {}).items():
+                setattr(comp, attr, val)
+
+            # --- _orig_connections for cables -----------------------------
+            orig = snap["orig_connections"].get(cid)
+            if orig is not None:
+                comp._orig_connections = dict(orig)
+            elif hasattr(comp, "_orig_connections"):
+                comp._orig_connections = {}
+
+            # --- Static affordances --------------------------------------
+            snap_static = snap["static_affordances"].get(cid, set())
+            curr_static = set(comp.affordances._static)
+            for a in curr_static - snap_static:
+                comp.affordances.remove(a)
+            for a in snap_static - curr_static:
+                comp.affordances.add(a)
+
+        self.simulate()
+
+    # ------------------------------------------------------------------
+    # Hypothesis-verification helper
+    # ------------------------------------------------------------------
+
+    def repair_component(
+        self,
+        component_ids: "set[str]",
+        *,
+        already_repaired_ids: "set[str] | None" = None,
+    ) -> bool:
+        """
+        Reset to the post-fault snapshot, apply repairs to *component_ids*,
+        re-simulate, and return True if every component that was lit in the
+        nominal (pre-fault) state is lit again.
+
+        The circuit is restored to the fault state before returning, so
+        the caller sees no side-effects.
+
+        Parameters
+        ----------
+        component_ids:
+            IDs of the components to repair.  For each:
+              - disconnected cables: floating ports are reconnected to their
+                original nodes (taken from ``_orig_connections``).
+              - components with a fault overlay: the overlay is cleared.
+        already_repaired_ids:
+            Components that were confirmed repaired in previous partial
+            verifications; they are excluded from the snapshot restore so
+            they remain fixed during the test.
+        """
+        from diagnosable_systems_simulation.world.components import Cable
+
+        fault_snapshot = getattr(self, "_fault_snapshot", None)
+        nominal_lit: "frozenset[str]" = getattr(self, "_nominal_emitting_light", frozenset())
+        already = already_repaired_ids or set()
+
+        # 1. Reset to fault state (preserving previously confirmed repairs)
+        if fault_snapshot is not None:
+            self.restore_snapshot(fault_snapshot, exclude_ids=already)
+
+        # 2. Apply repairs
+        for cid in component_ids:
+            try:
+                comp = self.component(cid)
+            except KeyError:
+                continue
+            if isinstance(comp, Cable):
+                orig = getattr(comp, "_orig_connections", {})
+                for port_name, node_id in orig.items():
+                    if not comp.port(port_name).is_connected():
+                        self._graph.reconnect_port(cid, port_name, node_id)
+            if comp._fault_overlay:
+                comp._fault_overlay.clear()
+
+        # 3. Re-simulate
+        result = self.simulate()
+
+        # 4. Check whether all expected outputs are lit
+        lamp_on = bool(nominal_lit) and nominal_lit.issubset(result.emitting_light)
+
+        # 5. Restore back to fault state — caller decides what to persist
+        if fault_snapshot is not None:
+            self.restore_snapshot(fault_snapshot, exclude_ids=already)
+
+        return lamp_on
 
     # ------------------------------------------------------------------
     # Repr

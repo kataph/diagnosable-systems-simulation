@@ -25,7 +25,7 @@ from diagnosable_systems_simulation.world.components import (
 )
 
 _OPEN = 1e9   # GΩ — open circuit / reverse-biased diode
-_WIRE = 1e-6  # µΩ — ideal wire
+_WIRE = 1e-2  # 10 mΩ — ideal wire
 
 
 class StubBackend(SimulationBackend):
@@ -111,7 +111,7 @@ class StubBackend(SimulationBackend):
                         stamp_r(pn["p"], pn["n"], 1.0 / r)
 
                     elif isinstance(comp, Switch):
-                        r = _WIRE if params.get("is_closed") else _OPEN
+                        r = params.get("resistance", _WIRE if params.get("is_closed") else _OPEN)
                         stamp_r(pn["p"], pn["n"], 1.0 / r)
 
                     elif isinstance(comp, LED):
@@ -229,7 +229,7 @@ class StubBackend(SimulationBackend):
                 r = _OPEN if params.get("is_blown") else _WIRE
                 i = v_across / r
             elif isinstance(comp, Switch):
-                r = _WIRE if params.get("is_closed") else _OPEN
+                r = params.get("resistance", _WIRE if params.get("is_closed") else _OPEN)
                 i = v_across / r
             elif isinstance(comp, Potentiometer):
                 total_r = params.get("total_resistance", 1000.0) or 1000.0

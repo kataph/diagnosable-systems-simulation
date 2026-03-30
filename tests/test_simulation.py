@@ -15,7 +15,7 @@ import pytest
 
 from diagnosable_systems_simulation.electrical_simulation.backend.stub import StubBackend
 from diagnosable_systems_simulation.systems.three_cubes.factory import build_three_cubes_system
-from diagnosable_systems_simulation.actions.diagnostic_actions import MeasureVoltage, ToggleSwitch
+from diagnosable_systems_simulation.actions.diagnostic_actions import CloseSwitch, MeasureVoltage, OpenSwitch
 from diagnosable_systems_simulation.actions.fault_actions import (
     DegradeComponent, DisconnectCable, ForceSwitch, ReconnectCable,
 )
@@ -165,27 +165,40 @@ class TestNominalCurrents:
 
 
 # ---------------------------------------------------------------------------
-# 5. Switch toggle
+# 5. Switch open/close
 # ---------------------------------------------------------------------------
 
 class TestSwitchToggle:
-    def test_toggle_switch_turns_lamp_off(self, backend):
+    def test_open_switch_turns_lamp_off(self, backend):
         s = _fresh(backend)
-        assert s.last_result.is_lit("main_bulb"), "Lamp must be ON before toggle"
-        s.apply_action(ToggleSwitch(), {"subject": s.component("ctrl_switch")})
+        assert s.last_result.is_lit("main_bulb"), "Lamp must be ON before opening switch"
+        s.apply_action(OpenSwitch(), {"subject": s.component("ctrl_switch")})
         assert not s.last_result.is_lit("main_bulb"), "Lamp must be OFF after opening switch"
 
-    def test_toggle_switch_green_stays_on(self, backend):
+    def test_open_switch_green_stays_on(self, backend):
         s = _fresh(backend)
-        s.apply_action(ToggleSwitch(), {"subject": s.component("ctrl_switch")})
+        s.apply_action(OpenSwitch(), {"subject": s.component("ctrl_switch")})
         assert s.last_result.is_lit("psu_green_led"), \
             "PSU green LED must stay ON after opening switch"
 
-    def test_double_toggle_restores_lamp(self, backend):
+    def test_open_then_close_restores_lamp(self, backend):
         s = _fresh(backend)
-        s.apply_action(ToggleSwitch(), {"subject": s.component("ctrl_switch")})
-        s.apply_action(ToggleSwitch(), {"subject": s.component("ctrl_switch")})
-        assert s.last_result.is_lit("main_bulb"), "Lamp must be ON again after two toggles"
+        s.apply_action(OpenSwitch(), {"subject": s.component("ctrl_switch")})
+        s.apply_action(CloseSwitch(), {"subject": s.component("ctrl_switch")})
+        assert s.last_result.is_lit("main_bulb"), "Lamp must be ON again after open then close"
+
+    def test_open_switch_idempotent(self, backend):
+        s = _fresh(backend)
+        s.apply_action(OpenSwitch(), {"subject": s.component("ctrl_switch")})
+        result = s.apply_action(OpenSwitch(), {"subject": s.component("ctrl_switch")})
+        assert result.success, "Opening an already-open switch must succeed"
+        assert not s.last_result.is_lit("main_bulb")
+
+    def test_close_switch_idempotent(self, backend):
+        s = _fresh(backend)
+        result = s.apply_action(CloseSwitch(), {"subject": s.component("ctrl_switch")})
+        assert result.success, "Closing an already-closed switch must succeed"
+        assert s.last_result.is_lit("main_bulb")
 
 
 # ---------------------------------------------------------------------------

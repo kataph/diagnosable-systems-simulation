@@ -15,7 +15,10 @@ Usage::
 from __future__ import annotations
 
 import json
+import logging
 from typing import Literal
+
+_logger = logging.getLogger("nl_interface")
 
 import anthropic, openai
 
@@ -23,7 +26,7 @@ from diagnosable_systems_simulation.actions.base import ActionCost
 from diagnosable_systems_simulation.actions.diagnostic_actions import (
     AdjustPotentiometer, ClosePeephole, InspectConnections, InvertEnclosure,
     MeasureVoltage, ObserveComponent, OpenPeephole, ReplaceComponent,
-    RestoreEnclosure, TestContinuity, TestDiode, ToggleSwitch,
+    CloseSwitch, OpenSwitch, RestoreEnclosure, TestContinuity, TestDiode, VerifyRepair,
 )
 from diagnosable_systems_simulation.actions.fault_actions import (
     DegradeComponent, DisconnectCable, ForceSwitch, ReconnectCable,
@@ -31,6 +34,7 @@ from diagnosable_systems_simulation.actions.fault_actions import (
 from diagnosable_systems_simulation.systems.base_system import DiagnosableSystem
 
 MODEL = "nf-gpt-4o-2024-08-06"
+# MODEL = "gpt-4.1"
 Backend = Literal["openai", "anthropic"]
 BACKEND: Backend = "openai"
 
@@ -42,7 +46,8 @@ BACKEND: Backend = "openai"
 _REGISTRY: dict[str, tuple] = {
     "observe_component":   (ObserveComponent,   {}),
     "measure_voltage":     (MeasureVoltage,     {}),
-    "toggle_switch":       (ToggleSwitch,       {}),
+    "open_switch":         (OpenSwitch,         {}),
+    "close_switch":        (CloseSwitch,        {}),
     "test_continuity":     (TestContinuity,     {}),
     "test_diode":          (TestDiode,          {}),
     "inspect_connections": (InspectConnections, {}),
@@ -69,6 +74,7 @@ _REGISTRY: dict[str, tuple] = {
     "force_switch":        (ForceSwitch,        {
         "is_closed": "bool — true = permanently closed, false = permanently open",
     }),
+    "verify_repair":       (VerifyRepair,       {}),
 }
 
 # ---------------------------------------------------------------------------
@@ -113,9 +119,10 @@ def _client(backend: Backend = BACKEND) -> "TextClient":
     return _CLIENT
 
 
-def _action_menu() -> str:
+def _action_menu(registry: "dict | None" = None) -> str:
+    reg = registry if registry is not None else _REGISTRY
     lines = []
-    for aid, (cls, params) in _REGISTRY.items():
+    for aid, (cls, params) in reg.items():
         pstr = f"  params: {params}" if params else ""
         lines.append(f"- {aid}: {cls.description}{pstr}")
     return "\n".join(lines)
@@ -137,24 +144,42 @@ _PARSE_SYSTEM = """\
 You map a technician's instruction to a JSON list of actions on a physical system.
 Each action must be:
   {"action_id": "<id>", "subject": "<component_id>", "params": {<constructor kwargs>}}
-"params" may be omitted if the action has no constructor parameters.
+If an action has no listed parameters, omit "params" entirely — do NOT include it at all.
+Never add keys to "params" that are not listed in the action's parameter description.
 Return ONLY the JSON array — no markdown fences, no commentary.\
 """
 
 
-def _parse(text: str, system) -> list[dict]:
+def _parse(text: str, system, model: str = MODEL, allowed_actions: "set[str] | None" = None) -> list[dict]:
+    registry = (
+        {k: v for k, v in _REGISTRY.items() if k in allowed_actions}
+        if allowed_actions is not None
+        else _REGISTRY
+    )
     prompt = (
-        f"Available actions:\n{_action_menu()}\n\n"
+        f"Available actions:\n{_action_menu(registry)}\n\n"
         f"System components:\n{_component_menu(system)}\n\n"
         f"Instruction: {text}"
     )
     raw = _client().create(
-        model=MODEL,
+        model=model,
         system_prompt=_PARSE_SYSTEM,
         user_prompt=prompt,
-        max_output_tokens=512,
+        max_output_tokens=2048,
     )
-    return json.loads(raw)
+    if not raw.rstrip().endswith("]"):
+        _logger.warning(
+            "nl_interface._parse: response does not end with ']' — likely truncated. "
+            f"Length={len(raw)} chars. Tail: {raw[-120:]!r}"
+        )
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as exc:
+        _logger.warning(
+            f"nl_interface._parse: JSON decode failed ({exc}). "
+            f"Raw response was: {raw!r}. Returning empty action list."
+        )
+        return []
 
 
 
@@ -163,14 +188,26 @@ def _parse(text: str, system) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def _instantiate(entry: dict):
-    cls, _ = _REGISTRY[entry["action_id"]]
-    params = entry.get("params") or {}
+    cls, declared_params = _REGISTRY[entry["action_id"]]
+    raw = entry.get("params") or {}
+    # Only pass params declared in the registry; drop any extra keys the LLM hallucinated.
+    params = {k: v for k, v in raw.items() if k in declared_params}
     return cls(**params) if params else cls()
 
 
-def _execute(entries: list[dict], system) -> list[tuple]:
+def _execute(entries: list[dict], system, allowed_actions: "set[str] | None" = None) -> list[tuple]:
     results = []
     for entry in entries:
+        action_id = entry.get("action_id", "?")
+        if allowed_actions is not None and action_id not in allowed_actions:
+            from diagnosable_systems_simulation.actions.base import ActionResult
+            result = ActionResult(
+                success=False,
+                message=f"[{action_id}] not permitted in current mode.",
+            )
+            action = type("_stub", (), {"action_id": action_id, "cost": ActionCost()})()
+            results.append((action, result))
+            continue
         try:
             action = _instantiate(entry)
             subject_id = entry.get("subject")
@@ -178,7 +215,6 @@ def _execute(entries: list[dict], system) -> list[tuple]:
             result = system.apply_action(action, targets)
         except Exception as exc:
             from diagnosable_systems_simulation.actions.base import ActionResult
-            action_id = entry.get("action_id", "?")
             result = ActionResult(success=False, message=f"[{action_id}] error: {exc}")
             action = type("_stub", (), {"action_id": action_id, "cost": ActionCost()})()
         results.append((action, result))
@@ -189,7 +225,7 @@ def _execute(entries: list[dict], system) -> list[tuple]:
 # Step 3: verbalize
 # ---------------------------------------------------------------------------
 
-def _verbalize(results: list[tuple], original_text: str) -> str:
+def _verbalize(results: list[tuple], original_text: str, model: str = MODEL) -> str:
     lines = []
     for action, result in results:
         lines.append(f"action_id: {action.action_id}, action_description: {original_text}, success: {result.success}, message: {result.message}")
@@ -200,8 +236,11 @@ def _verbalize(results: list[tuple], original_text: str) -> str:
     raw = "\n".join(lines)
 
     return _client().create(
-        model=MODEL,
-        system_prompt="You are a concise technical assistant. Summarize diagnostic results in 1–3 plain sentences for a technician.",
+        model=model,
+        system_prompt="""You are a summarization robot. Summarize diagnostic results in 1–3 plain sentences for a technician.
+        It is very important that you limit yourself to the summarization and do not express opinions about, say, likely causes of what you see.
+        Only summarize the information contained in the user prompt, do not add any other information/opinion/consideration/remark/etc.
+        Something terrible with happen if you do not limit yourself to a strict summarization taks.""",
         user_prompt=raw,
         max_output_tokens=256,
     )
@@ -211,13 +250,18 @@ def _verbalize(results: list[tuple], original_text: str) -> str:
 # Public API
 # ---------------------------------------------------------------------------
 
-def run(text: str, system: DiagnosableSystem) -> tuple[str, ActionCost]:
+def run(text: str, system: DiagnosableSystem, model: str = MODEL, allowed_actions: "set[str] | None" = None) -> tuple[str, ActionCost, list[dict], list[tuple]]:
     """
     Parse *text*, execute the implied actions on *system*, and return a
     plain-language summary together with the total action cost.
+    Return textual outcome, cost, parsed actions, action results
+
+    allowed_actions: if provided, restricts the action registry to this set of
+        action IDs.  Use this to prevent the NL agent from attempting repair or
+        fault-injection actions during ordinary diagnosis.
     """
-    entries = _parse(text, system)
-    results = _execute(entries, system)
+    entries = _parse(text, system, model, allowed_actions)
+    results = _execute(entries, system, allowed_actions)
 
     total = ActionCost(
         time=sum(a.cost.time for a, _ in results),
@@ -228,5 +272,5 @@ def run(text: str, system: DiagnosableSystem) -> tuple[str, ActionCost]:
             for k, v in a.cost.resources_consumed.items()
         },
     )
-
-    return _verbalize(rsults=results, original_text=text), total
+        
+    return _verbalize(results=results, original_text=text, model=model), total, entries, results

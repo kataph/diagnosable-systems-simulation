@@ -4,7 +4,7 @@ All diagnostic and fault-injection actions in one place.
 Usage::
 
     from diagnosable_systems_simulation.actions import (
-        MeasureVoltage, ObserveComponent, ToggleSwitch,
+        CloseSwitch, MeasureVoltage, ObserveComponent, OpenSwitch,
         DisconnectCable, DegradeComponent,
     )
 """
@@ -21,9 +21,10 @@ from diagnosable_systems_simulation.actions.diagnostic_actions import (
     OpenPeephole,
     ReplaceComponent,
     RestoreEnclosure,
+    CloseSwitch,
+    OpenSwitch,
     TestContinuity,
     TestDiode,
-    ToggleSwitch,
 )
 from diagnosable_systems_simulation.actions.fault_actions import (
     BlowFuse,
@@ -39,9 +40,9 @@ __all__ = [
     "Action", "ActionCost", "ActionResult",
     # Diagnostic
     "AdjustPotentiometer", "ClosePeephole", "InspectConnections",
-    "InvertEnclosure", "MeasureVoltage", "ObserveComponent", "OpenPeephole",
-    "ReplaceComponent", "RestoreEnclosure", "TestContinuity", "TestDiode",
-    "ToggleSwitch",
+    "CloseSwitch", "InvertEnclosure", "MeasureVoltage", "ObserveComponent",
+    "OpenPeephole", "OpenSwitch", "ReplaceComponent", "RestoreEnclosure",
+    "TestContinuity", "TestDiode",
     # Fault injection
     "BlowFuse", "DegradeComponent", "DisconnectCable",
     "ForceSwitch", "ReconnectCable", "ShortCircuit",

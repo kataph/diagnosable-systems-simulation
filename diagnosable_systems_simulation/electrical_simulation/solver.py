@@ -133,9 +133,11 @@ class SimulationRunner:
         self,
         backend: SimulationBackend,
         couplings: list[PhysicalCoupling] | None = None,
+        logger: Logger | None = None,
     ):
         self.backend = backend
         self.couplings: list[PhysicalCoupling] = list(couplings or [])
+        self.logger = logger
 
     def run(
         self,
@@ -145,7 +147,7 @@ class SimulationRunner:
         result: Optional[SimulationResult] = None
 
         for iteration in range(self.MAX_ITERATIONS):
-            result = self.backend.solve(graph)
+            result = self.backend.solve(graph, self.logger)
 
             if not result.converged:
                 # Propagate failure immediately; no point iterating.

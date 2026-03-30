@@ -8,6 +8,55 @@ from diagnosable_systems_simulation.actions.preconditions import (
 from diagnosable_systems_simulation.world.affordances import Affordance
 
 
+def _nearby_anomalies(comp, graph) -> list[str]:
+    """
+    Return human-readable anomaly strings for components directly adjacent
+    (sharing a circuit node) to *comp* that are in an abnormal state a
+    technician at this location would physically observe.
+
+    Currently detects:
+      • Cables with a floating port whose ``_orig_connections`` pointed to a
+        node of *comp* — i.e. a cable end that was plugged into this
+        component's terminal but has since been disconnected.
+
+    Designed to be extended with further anomaly checks as needed.
+    """
+    from diagnosable_systems_simulation.world.components import Cable
+
+    comp_nodes = {p.node_id for p in comp.ports if p.is_connected()}
+    anomalies: list[str] = []
+    seen: set[str] = set()
+
+    for edge in graph.get_netlist():
+        neighbor = edge.component
+        if neighbor.component_id == comp.component_id or neighbor.component_id in seen:
+            continue
+        seen.add(neighbor.component_id)
+
+        # --- Check: disconnected cable end adjacent to comp ---
+        # Triggers if the cable's disconnected port was originally on one of
+        # comp's nodes (direct adjacency), OR if the cable's still-connected
+        # port shares a node with comp (one-hop adjacency — detects upstream
+        # disconnections that make the circuit degenerate).
+        if isinstance(neighbor, Cable):
+            orig = getattr(neighbor, "_orig_connections", {})
+            cable_live_nodes = {p.node_id for p in neighbor.ports if p.is_connected()}
+            for port in neighbor.ports:
+                if port.is_connected():
+                    continue
+                if orig.get(port.name) in comp_nodes or cable_live_nodes & comp_nodes:
+                    anomalies.append(
+                        f"cable '{neighbor.display_name}' has a disconnected end "
+                        f"(port '{port.name}' is floating; originally attached to terminal "
+                        f"'{orig.get(port.name, 'unknown')}')"
+                    )
+
+        # --- Future checks can be added here ---
+        # e.g. blown fuse on adjacent node, degraded component visible at terminal, …
+
+    return anomalies
+
+
 class ObserveComponent(Action):
     """
     Visually inspect a component.
@@ -41,7 +90,7 @@ class MeasureVoltage(Action):
     """
     Measure voltage at a component's ports using a multimeter.
 
-    Requires OBSERVABLE and MEASURABLE affordance and "multimeter" in tools_in_hand.
+    Requires REACHABLE and MEASURABLE affordance and "multimeter" in tools_in_hand.
     Returns an ObservationRecord with port voltages and branch current.
 
     targets: {"subject": <any Component>}
@@ -54,7 +103,7 @@ class MeasureVoltage(Action):
     def check_preconditions(self, targets, context):
         ok, failures = PreconditionChecker.check_all(
             [
-                AffordanceRequirement("subject", Affordance.OBSERVABLE),
+                AffordanceRequirement("subject", Affordance.REACHABLE),
                 AffordanceRequirement("subject", Affordance.MEASURABLE),
                 ToolRequirement("multimeter"),
             ],
@@ -69,6 +118,23 @@ class MeasureVoltage(Action):
             action_id=self.action_id,
             simulation_snapshot=last_result,
         )
+        # Detect floating ports — a disconnected cable makes the circuit
+        # degenerate; do not expose numerically unstable simulation results.
+        floating = [p.name for p in comp.ports if not p.is_connected()]
+        if floating:
+            record.add("disconnected_ports", str(floating))
+            anomalies = _nearby_anomalies(comp, graph)
+            if anomalies:
+                record.add("nearby_anomalies", "; ".join(anomalies))
+            anomaly_suffix = (" NEARBY ANOMALY: " + "; ".join(anomalies)) if anomalies else ""
+            return ActionResult(
+                observation=record,
+                message=(
+                    f"Cannot meaningfully measure {comp.display_name!r}: "
+                    f"port(s) {floating} are physically disconnected (floating).{anomaly_suffix}"
+                ),
+            )
+
         if last_result is None:
             record.add("note", "No simulation result available.")
         else:
@@ -80,31 +146,43 @@ class MeasureVoltage(Action):
             i = last_result.current(comp.component_id)
             if i is not None:
                 record.add("current", round(i, 6), "A")
+        anomalies = _nearby_anomalies(comp, graph)
+        if anomalies:
+            record.add("nearby_anomalies", "; ".join(anomalies))
+        anomaly_suffix = (" NEARBY ANOMALY: " + "; ".join(anomalies)) if anomalies else ""
         return ActionResult(
             observation=record,
-            message=f"Measured {comp.display_name!r}.",
+            message=f"Measured {comp.display_name!r}.{anomaly_suffix}",
         )
 
 
-class ToggleSwitch(Action):
+class OpenSwitch(Action):
     """
-    Flip a switch between open and closed.
+    Set a switch to the open (off) position.
 
-    Requires TOGGLABLE affordance.
+    **Idempotent**: if the switch is already open, no mutation is made and
+    the message reports the existing state.  The action never fails because
+    the switch is already in the target position.
 
-    targets: {"switch": <Switch component>}
+    Prefer this over a "toggle" action when calling through the NL
+    interface: the agent has no access to the current simulation state, so
+    a toggle would be ambiguous; a state-targeting action is always safe.
+
+    Requires REACHABLE and TOGGLABLE affordance.
+    targets: {"subject": <Switch component>}
     """
 
-    action_id = "toggle_switch"
-    description = "Flip a switch open or closed."
+    action_id = "open_switch"
+    description = "Open a switch (set it to the off/open position). Safe to call even if already open."
     cost = ActionCost(time=10.0)
     mutates_graph = True
 
     def check_preconditions(self, targets, context):
         ok, failures = PreconditionChecker.check_all(
-            [AffordanceRequirement("subject", Affordance.TOGGLABLE),
-            AffordanceRequirement("subject", Affordance.OBSERVABLE),
-             ],
+            [
+                AffordanceRequirement("subject", Affordance.REACHABLE),
+                AffordanceRequirement("subject", Affordance.TOGGLABLE),
+            ],
             targets, context,
         )
         return ok, "; ".join(failures)
@@ -112,16 +190,61 @@ class ToggleSwitch(Action):
     def execute(self, targets, graph, context, last_result):
         from diagnosable_systems_simulation.world.components import Switch
         sw: Switch = targets["subject"]  # type: ignore[assignment]
-        sw.is_closed = not sw.is_closed
-        state = "closed" if sw.is_closed else "open"
-        return ActionResult(message=f"Switch {sw.display_name!r} is now {state}.")
+        if not sw.is_closed:
+            return ActionResult(
+                message=f"Switch {sw.display_name!r} is already open — no change made."
+            )
+        sw.is_closed = False
+        return ActionResult(message=f"Switch {sw.display_name!r} is now open.")
+
+
+class CloseSwitch(Action):
+    """
+    Set a switch to the closed (on) position.
+
+    **Idempotent**: if the switch is already closed, no mutation is made and
+    the message reports the existing state.  The action never fails because
+    the switch is already in the target position.
+
+    Prefer this over a "toggle" action when calling through the NL
+    interface: the agent has no access to the current simulation state, so
+    a toggle would be ambiguous; a state-targeting action is always safe.
+
+    Requires REACHABLE and TOGGLABLE affordance.
+    targets: {"subject": <Switch component>}
+    """
+
+    action_id = "close_switch"
+    description = "Close a switch (set it to the on/closed position). Safe to call even if already closed."
+    cost = ActionCost(time=10.0)
+    mutates_graph = True
+
+    def check_preconditions(self, targets, context):
+        ok, failures = PreconditionChecker.check_all(
+            [
+                AffordanceRequirement("subject", Affordance.REACHABLE),
+                AffordanceRequirement("subject", Affordance.TOGGLABLE),
+            ],
+            targets, context,
+        )
+        return ok, "; ".join(failures)
+
+    def execute(self, targets, graph, context, last_result):
+        from diagnosable_systems_simulation.world.components import Switch
+        sw: Switch = targets["subject"]  # type: ignore[assignment]
+        if sw.is_closed:
+            return ActionResult(
+                message=f"Switch {sw.display_name!r} is already closed — no change made."
+            )
+        sw.is_closed = True
+        return ActionResult(message=f"Switch {sw.display_name!r} is now closed.")
 
 
 class ReplaceComponent(Action):
     """
     Replace a faulty component with a fresh one (restores nominal parameters).
 
-    Requires REPLACEABLE affordance. Clears fault overlay. Consumes a replacement part.
+    Requires REACHABLE and REPLACEABLE affordance. Clears fault overlay. Consumes a replacement part.
 
     targets: {"subject": <any Component>}
     """
@@ -139,7 +262,10 @@ class ReplaceComponent(Action):
 
     def check_preconditions(self, targets, context):
         ok, failures = PreconditionChecker.check_all(
-            [AffordanceRequirement("subject", Affordance.REPLACEABLE)],
+            [
+                AffordanceRequirement("subject", Affordance.REACHABLE),
+                AffordanceRequirement("subject", Affordance.REPLACEABLE),
+            ],
             targets, context,
         )
         return ok, "; ".join(failures)
@@ -164,8 +290,8 @@ class InvertEnclosure(Action):
     """
     Lift and invert an enclosure (e.g. flip a cube upside-down).
 
-    Makes components inside visible through the open bottom face.
-    Requires MOVABLE affordance on the enclosure.
+    Makes components inside visible and reachable through the open bottom face.
+    Requires REACHABLE and MOVABLE affordance on the enclosure.
 
     targets: {"enclosure": <Component representing the enclosure>}
     """
@@ -176,7 +302,10 @@ class InvertEnclosure(Action):
 
     def check_preconditions(self, targets, context):
         ok, failures = PreconditionChecker.check_all(
-            [AffordanceRequirement("subject", Affordance.MOVABLE)],
+            [
+                AffordanceRequirement("subject", Affordance.REACHABLE),
+                AffordanceRequirement("subject", Affordance.MOVABLE),
+            ],
             targets, context,
         )
         return ok, "; ".join(failures)
@@ -192,6 +321,7 @@ class RestoreEnclosure(Action):
     """
     Put an inverted enclosure back in its normal orientation.
 
+    Requires REACHABLE and MOVABLE affordance on the enclosure.
     targets: {"enclosure": <Component representing the enclosure>}
     """
 
@@ -201,7 +331,10 @@ class RestoreEnclosure(Action):
 
     def check_preconditions(self, targets, context):
         ok, failures = PreconditionChecker.check_all(
-            [AffordanceRequirement("subject", Affordance.MOVABLE)],
+            [
+                AffordanceRequirement("subject", Affordance.REACHABLE),
+                AffordanceRequirement("subject", Affordance.MOVABLE),
+            ],
             targets, context,
         )
         return ok, "; ".join(failures)
@@ -219,7 +352,7 @@ class OpenPeephole(Action):
 
     Sets ``peephole.is_open = True``; conditional affordances on internal
     components pick up the change automatically.
-    Requires OPENABLE affordance on the peephole component.
+    Requires REACHABLE and OPENABLE affordance on the peephole component.
 
     targets: {"subject": <Peephole>}
     """
@@ -230,7 +363,10 @@ class OpenPeephole(Action):
 
     def check_preconditions(self, targets, context):
         ok, failures = PreconditionChecker.check_all(
-            [AffordanceRequirement("subject", Affordance.OPENABLE)],
+            [
+                AffordanceRequirement("subject", Affordance.REACHABLE),
+                AffordanceRequirement("subject", Affordance.OPENABLE),
+            ],
             targets, context,
         )
         return ok, "; ".join(failures)
@@ -247,7 +383,7 @@ class ClosePeephole(Action):
     Close an open peephole.
 
     Sets ``peephole.is_open = False``.
-    Requires CLOSEABLE affordance on the peephole component.
+    Requires REACHABLE and CLOSEABLE affordance on the peephole component.
 
     targets: {"subject": <Peephole>}
     """
@@ -258,7 +394,10 @@ class ClosePeephole(Action):
 
     def check_preconditions(self, targets, context):
         ok, failures = PreconditionChecker.check_all(
-            [AffordanceRequirement("subject", Affordance.CLOSEABLE)],
+            [
+                AffordanceRequirement("subject", Affordance.REACHABLE),
+                AffordanceRequirement("subject", Affordance.CLOSEABLE),
+            ],
             targets, context,
         )
         return ok, "; ".join(failures)
@@ -274,7 +413,7 @@ class AdjustPotentiometer(Action):
     """
     Adjust the wiper position of a potentiometer.
 
-    Requires ADJUSTABLE affordance.
+    Requires REACHABLE and ADJUSTABLE affordance.
 
     targets: {"subject": <Potentiometer component>}
     """
@@ -291,7 +430,10 @@ class AdjustPotentiometer(Action):
 
     def check_preconditions(self, targets, context):
         ok, failures = PreconditionChecker.check_all(
-            [AffordanceRequirement("subject", Affordance.ADJUSTABLE)],
+            [
+                AffordanceRequirement("subject", Affordance.REACHABLE),
+                AffordanceRequirement("subject", Affordance.ADJUSTABLE),
+            ],
             targets, context,
         )
         return ok, "; ".join(failures)
@@ -310,8 +452,7 @@ class TestContinuity(Action):
     """
     Test resistance / continuity of a component using a multimeter in ohmmeter mode.
 
-    Requires MEASURABLE affordance and "multimeter" in tools_in_hand.
-    Does NOT require the component to be visible (probes only need physical access).
+    Requires REACHABLE and MEASURABLE affordance and "multimeter" in tools_in_hand.
 
     Compares ``current_parameters()["resistance"]`` against the nominal value and
     reports one of: nominal / open circuit (R > 1 MΩ) / short circuit (R < 0.01 Ω) /
@@ -327,6 +468,7 @@ class TestContinuity(Action):
     def check_preconditions(self, targets, context):
         ok, failures = PreconditionChecker.check_all(
             [
+                AffordanceRequirement("subject", Affordance.REACHABLE),
                 AffordanceRequirement("subject", Affordance.MEASURABLE),
                 ToolRequirement("multimeter"),
             ],
@@ -344,6 +486,23 @@ class TestContinuity(Action):
             action_id=self.action_id,
         )
 
+        # Detect physically disconnected ports (node_id is None) before reading resistance.
+        # A cable whose ports are floating is an open circuit regardless of its nominal resistance.
+        floating = [p.name for p in comp.ports if not p.is_connected()]
+        if floating:
+            r_nom = nominal.get("resistance", 0.0)
+            record.add("resistance_measured", round(1e9, 0), "Ω")
+            record.add("resistance_nominal", round(r_nom, 4), "Ω")
+            record.add("status", "open circuit")
+            return ActionResult(
+                observation=record,
+                message=(
+                    f"'{comp.display_name}' continuity: open circuit"
+                    f" — the component is physically disconnected from the circuit"
+                    f" (floating ports: {floating})."
+                ),
+            )
+
         if "resistance" not in params:
             record.add("note", "Component has no resistance parameter.")
             return ActionResult(
@@ -356,19 +515,25 @@ class TestContinuity(Action):
         record.add("resistance_measured", round(r_now, 4), "Ω")
         record.add("resistance_nominal", round(r_nom, 4), "Ω")
 
-        if r_now > 1e6:
+        # Check nominal first so components with very low/high nominal R
+        # (e.g. closed switch with Ron=1e-6) are not mis-classified.
+        if abs(r_now - r_nom) / max(r_nom, 1.0) < 0.05:
+            status = "nominal"
+        elif r_now > 1e6:
             status = "open circuit"
         elif r_now < 0.01:
             status = "short circuit"
-        elif abs(r_now - r_nom) / max(r_nom, 1.0) < 0.05:
-            status = "nominal"
         else:
             status = "degraded"
 
         record.add("status", status)
+        anomalies = _nearby_anomalies(comp, graph)
+        if anomalies:
+            record.add("nearby_anomalies", "; ".join(anomalies))
+        anomaly_suffix = (" NEARBY ANOMALY: " + "; ".join(anomalies)) if anomalies else ""
         return ActionResult(
             observation=record,
-            message=f"{comp.display_name!r} continuity: {status} (R={r_now:.2f} Ω, nominal={r_nom:.2f} Ω).",
+            message=f"{comp.display_name!r} continuity: {status} (R={r_now:.2f} Ω, nominal={r_nom:.2f} Ω).{anomaly_suffix}",
         )
 
 
@@ -376,7 +541,7 @@ class TestDiode(Action):
     """
     Test a diode or LED using the multimeter's diode-test mode.
 
-    Requires MEASURABLE affordance and "multimeter" in tools_in_hand.
+    Requires REACHABLE and MEASURABLE affordance and "multimeter" in tools_in_hand.
     Reads ``current_parameters()["forward_voltage"]`` and compares it against
     the nominal value.  Reports one of:
       - nominal           — Vf within 10 % of spec
@@ -394,6 +559,7 @@ class TestDiode(Action):
     def check_preconditions(self, targets, context):
         ok, failures = PreconditionChecker.check_all(
             [
+                AffordanceRequirement("subject", Affordance.REACHABLE),
                 AffordanceRequirement("subject", Affordance.MEASURABLE),
                 ToolRequirement("multimeter"),
             ],
@@ -490,7 +656,39 @@ class InspectConnections(Action):
                 record.add(f"port_{port.name}", cable_str)
 
         summary = "; ".join(lines)
+        anomalies = _nearby_anomalies(comp, graph)
+        if anomalies:
+            record.add("nearby_anomalies", "; ".join(anomalies))
+        anomaly_suffix = (" NEARBY ANOMALY: " + "; ".join(anomalies)) if anomalies else ""
         return ActionResult(
             observation=record,
-            message=f"Connections on {comp.display_name!r}: {summary}.",
+            message=f"Connections on {comp.display_name!r}: {summary}.{anomaly_suffix}",
         )
+
+
+class VerifyRepair(Action):
+    """
+    Hypothesis-verification action.
+
+    The NL interface resolves a free-text fault hypothesis to a concrete
+    component ID by mapping it to this action.  Execution is intentionally
+    a no-op: the service agent reads the resolved ``subject`` ID from the
+    parsed action entry and calls ``DiagnosableSystem.repair_component()``.
+
+    targets: {"subject": <any Component>}
+    """
+
+    action_id = "verify_repair"
+    description = (
+        "Identify the component that the technician suspects is faulty and "
+        "mark it for hypothesis verification (repair-and-test)."
+    )
+    cost = ActionCost(time=120.0)
+
+    def check_preconditions(self, targets, context):
+        return True, ""
+
+    def execute(self, targets, graph, context, last_result):
+        comp = targets.get("subject")
+        name = comp.display_name if comp is not None else "unknown"
+        return ActionResult(message=f"Marked '{name}' as hypothesis-verification target.")

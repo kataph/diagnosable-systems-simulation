@@ -11,15 +11,16 @@ if TYPE_CHECKING:
 
 class Affordance(Enum):
     OBSERVABLE    = auto()  # can be seen and described
-    MEASURABLE    = auto()  # electrical meter can be placed on its ports
-    DETACHABLE    = auto()  # can be physically disconnected from circuit
-    RECONNECTABLE = auto()  # can be reconnected after detachment
-    REPLACEABLE   = auto()  # can be swapped for a new unit
-    ADJUSTABLE    = auto()  # a parameter can be changed (e.g. potentiometer wiper)
-    MOVABLE       = auto()  # physical position can be changed
-    OPENABLE      = auto()  # enclosure or access port can be opened
-    CLOSEABLE     = auto()  # enclosure or access port can be closed
-    TOGGLABLE     = auto()  # switch state can be flipped
+    REACHABLE     = auto()  # can be physically touched/probed (implies OBSERVABLE)
+    MEASURABLE    = auto()  # electrical meter can be placed on its ports (requires REACHABLE)
+    DETACHABLE    = auto()  # can be physically disconnected from circuit (requires REACHABLE)
+    RECONNECTABLE = auto()  # can be reconnected after detachment (requires REACHABLE)
+    REPLACEABLE   = auto()  # can be swapped for a new unit (requires REACHABLE)
+    ADJUSTABLE    = auto()  # a parameter can be changed (e.g. potentiometer wiper) (requires REACHABLE)
+    MOVABLE       = auto()  # physical position can be changed (requires REACHABLE)
+    OPENABLE      = auto()  # enclosure or access port can be opened (requires REACHABLE)
+    CLOSEABLE     = auto()  # enclosure or access port can be closed (requires REACHABLE)
+    TOGGLABLE     = auto()  # switch state can be flipped (requires REACHABLE)
 
 
 @dataclass(frozen=True)
@@ -91,6 +92,9 @@ class AffordanceSet:
         for ca in self._conditional:
             if ca.condition(component, context):
                 active.add(ca.affordance)
+        # REACHABLE implies OBSERVABLE: if you can touch it, you can see it.
+        if Affordance.REACHABLE in active:
+            active.add(Affordance.OBSERVABLE)
         return active
 
     def __repr__(self) -> str:

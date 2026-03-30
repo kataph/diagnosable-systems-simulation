@@ -42,6 +42,16 @@ def _when_inverted(enclosure, peephole=None):
     return condition
 
 
+def _when_inverted_only(enclosure):
+    """Return a condition callable: True only when *enclosure* is inverted (not when peephole open).
+
+    Used for REACHABLE: a peephole lets you see inside but not physically probe or manipulate.
+    """
+    def condition(component, _ctx):
+        return enclosure.is_inverted
+    return condition
+
+
 # ---------------------------------------------------------------------------
 # PSU module  (identical for all systems)
 # ---------------------------------------------------------------------------
@@ -71,10 +81,12 @@ def create_psu_module(x_left: float = 0.0) -> SimpleNamespace:
     )
     source.affordances = AffordanceSet(
         static={Affordance.MEASURABLE},
-        conditional=[ConditionalAffordance(
-            Affordance.OBSERVABLE, _when_inverted(cube),
-            "observable when PSU cube is inverted",
-        )],
+        conditional=[
+            ConditionalAffordance(
+                Affordance.REACHABLE, _when_inverted_only(cube),
+                "reachable when PSU cube is inverted",
+            ),
+        ],
     )
     green_led = LED(
         component_id="psu_green_led",
@@ -86,7 +98,7 @@ def create_psu_module(x_left: float = 0.0) -> SimpleNamespace:
         enclosure_id="cube_psu",
     )
     green_led.affordances = AffordanceSet(
-        static={Affordance.OBSERVABLE, Affordance.MEASURABLE, Affordance.REPLACEABLE},
+        static={Affordance.REACHABLE, Affordance.MEASURABLE, Affordance.REPLACEABLE},
     )
     green_resistor = Resistor(
         component_id="psu_green_resistor",
@@ -98,8 +110,8 @@ def create_psu_module(x_left: float = 0.0) -> SimpleNamespace:
     green_resistor.affordances = AffordanceSet(
         static={Affordance.MEASURABLE, Affordance.REPLACEABLE},
         conditional=[ConditionalAffordance(
-            Affordance.OBSERVABLE, _when_inverted(cube),
-            "observable when PSU cube is inverted",
+            Affordance.REACHABLE, _when_inverted_only(cube),
+            "reachable when PSU cube is inverted",
         )],
     )
     cable_pos = Cable(
@@ -168,7 +180,7 @@ def create_3cubes_control_module(
         position=Position(x, 0.10, 0.05),
     )
     switch.affordances = AffordanceSet(
-        static={Affordance.OBSERVABLE, Affordance.TOGGLABLE, Affordance.MEASURABLE},
+        static={Affordance.REACHABLE, Affordance.TOGGLABLE, Affordance.MEASURABLE},
     )
     red_led = LED(
         component_id=f"{p}red_led",
@@ -180,7 +192,7 @@ def create_3cubes_control_module(
         enclosure_id=f"cube_{prefix}",
     )
     red_led.affordances = AffordanceSet(
-        static={Affordance.OBSERVABLE, Affordance.MEASURABLE, Affordance.REPLACEABLE},
+        static={Affordance.REACHABLE, Affordance.MEASURABLE, Affordance.REPLACEABLE},
     )
     red_resistor = Resistor(
         component_id=f"{p}red_resistor",
@@ -192,8 +204,8 @@ def create_3cubes_control_module(
     red_resistor.affordances = AffordanceSet(
         static={Affordance.MEASURABLE, Affordance.REPLACEABLE},
         conditional=[ConditionalAffordance(
-            Affordance.OBSERVABLE, _when_inverted(cube),
-            "observable when control cube is inverted",
+            Affordance.REACHABLE, _when_inverted_only(cube),
+            "reachable when control cube is inverted",
         )],
     )
     cable_in_pos  = Cable(f"{p}cable_in_pos",  "Control Input Cable (+)",  position=Position(x,        0.05, 0.07))
@@ -265,7 +277,7 @@ def create_10cubes_control_module(
         position=Position(x, 0.10, 0.05),
     )
     switch.affordances = AffordanceSet(
-        static={Affordance.OBSERVABLE, Affordance.TOGGLABLE, Affordance.MEASURABLE},
+        static={Affordance.REACHABLE, Affordance.TOGGLABLE, Affordance.MEASURABLE},
     )
     green_led = LED(
         component_id=f"{p}green_led",
@@ -277,7 +289,7 @@ def create_10cubes_control_module(
         enclosure_id=f"cube_{prefix}",
     )
     green_led.affordances = AffordanceSet(
-        static={Affordance.OBSERVABLE, Affordance.MEASURABLE, Affordance.REPLACEABLE},
+        static={Affordance.REACHABLE, Affordance.MEASURABLE, Affordance.REPLACEABLE},
     )
     green_resistor = Resistor(
         component_id=f"{p}green_resistor",
@@ -289,8 +301,8 @@ def create_10cubes_control_module(
     green_resistor.affordances = AffordanceSet(
         static={Affordance.MEASURABLE, Affordance.REPLACEABLE},
         conditional=[ConditionalAffordance(
-            Affordance.OBSERVABLE, _when_inverted(cube),
-            "observable when control cube is inverted",
+            Affordance.REACHABLE, _when_inverted_only(cube),
+            "reachable when control cube is inverted",
         )],
     )
     cable_in_pos  = Cable(f"{p}cable_in_pos",  f"Control Input Cable (+){lbl}",  position=Position(x,        0.05, 0.07))
@@ -340,7 +352,12 @@ def create_load_module(x_left: float = 0.30) -> SimpleNamespace:
     )
 
     def _visible(component, _ctx):
+        """Visible when cube is inverted OR peephole is open (but not necessarily reachable)."""
         return cube.is_inverted or peephole.is_open
+
+    def _reachable(component, _ctx):
+        """Physical probe/replacement access requires inverting the cube."""
+        return cube.is_inverted
 
     main_bulb = Bulb(
         component_id="main_bulb",
@@ -351,7 +368,7 @@ def create_load_module(x_left: float = 0.30) -> SimpleNamespace:
         enclosure_id="cube_load",
     )
     main_bulb.affordances = AffordanceSet(
-        static={Affordance.OBSERVABLE, Affordance.MEASURABLE, Affordance.REPLACEABLE},
+        static={Affordance.REACHABLE, Affordance.MEASURABLE, Affordance.REPLACEABLE},
     )
     internal_bulb = Bulb(
         component_id="internal_bulb",
@@ -362,11 +379,24 @@ def create_load_module(x_left: float = 0.30) -> SimpleNamespace:
         enclosure_id="cube_load",
     )
     internal_bulb.affordances = AffordanceSet(
-        static={Affordance.MEASURABLE, Affordance.REPLACEABLE},
-        conditional=[ConditionalAffordance(
-            Affordance.OBSERVABLE, _visible,
-            "observable when load cube is inverted or peephole is open",
-        )],
+        conditional=[
+            ConditionalAffordance(
+                Affordance.OBSERVABLE, _visible,
+                "observable when load cube is inverted or peephole is open",
+            ),
+            ConditionalAffordance(
+                Affordance.REACHABLE, _reachable,
+                "reachable when load cube is inverted",
+            ),
+            ConditionalAffordance(
+                Affordance.MEASURABLE, _reachable,
+                "measurable only when load cube is inverted (probe access)",
+            ),
+            ConditionalAffordance(
+                Affordance.REPLACEABLE, _reachable,
+                "replaceable only when load cube is inverted",
+            ),
+        ],
     )
     load_diode = Diode(
         component_id="load_diode",
@@ -376,11 +406,24 @@ def create_load_module(x_left: float = 0.30) -> SimpleNamespace:
         enclosure_id="cube_load",
     )
     load_diode.affordances = AffordanceSet(
-        static={Affordance.MEASURABLE, Affordance.REPLACEABLE},
-        conditional=[ConditionalAffordance(
-            Affordance.OBSERVABLE, _visible,
-            "observable when load cube is inverted or peephole is open",
-        )],
+        conditional=[
+            ConditionalAffordance(
+                Affordance.OBSERVABLE, _visible,
+                "observable when load cube is inverted or peephole is open",
+            ),
+            ConditionalAffordance(
+                Affordance.REACHABLE, _reachable,
+                "reachable when load cube is inverted",
+            ),
+            ConditionalAffordance(
+                Affordance.MEASURABLE, _reachable,
+                "measurable only when load cube is inverted (probe access)",
+            ),
+            ConditionalAffordance(
+                Affordance.REPLACEABLE, _reachable,
+                "replaceable only when load cube is inverted",
+            ),
+        ],
     )
     cable_pos = Cable("load_cable_pos", "Load Input Cable (+)", position=Position(x,        0.05, 0.07))
     cable_neg = Cable("load_cable_neg", "Load Input Cable (−)", position=Position(x,        0.05, 0.03))

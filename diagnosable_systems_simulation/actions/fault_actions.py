@@ -36,6 +36,12 @@ class DisconnectCable(Action):
     def execute(self, targets, graph, context, last_result):
         cable = targets["subject"]
         ports = self.port_names or [p.name for p in cable.ports]
+        # Save original node_ids before disconnecting so they can be restored later.
+        cable._orig_connections = {
+            p: cable.port(p).node_id
+            for p in ports
+            if cable.port(p).node_id is not None
+        }
         disconnected = [
             p for p in ports
             if cable.port(p).node_id is not None

@@ -97,6 +97,28 @@ class Action(ABC):
     - ``execute()``: performs the action, returns ``ActionResult``.
       execute() is only called after preconditions pass; it must not
       return success=False.
+
+    Idempotency requirement
+    -----------------------
+    Every action that is exposed to the NL interface **must be idempotent**:
+    invoking it when the target state is already in effect must succeed
+    silently (no error, informative message) rather than fail or produce an
+    unintended side-effect.
+
+    *Why this matters.*  The NL interface agent plans its actions from a
+    free-text description and has no access to the current simulation state.
+    A non-idempotent "toggle" action — one whose effect depends on the
+    current state — is therefore inherently unsafe: the agent cannot know
+    whether toggling a switch will open or close it.  By contrast, an
+    idempotent ``open_switch`` action always results in the switch being
+    open, regardless of its initial state, making the agent's intent
+    unambiguous.
+
+    Concrete rule: if an action targets a specific end-state (open, closed,
+    connected, …) and the system is already in that state, ``execute()``
+    must return ``ActionResult(success=True)`` with a message explaining
+    that no change was needed, rather than raising an error or mutating
+    state unexpectedly.
     """
 
     action_id: str

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from logging import Logger
 import math
-from typing import Any
+from typing import Any, Optional
 
 from diagnosable_systems_simulation.electrical_simulation.backend.base import SimulationBackend
 from diagnosable_systems_simulation.electrical_simulation.circuit import CircuitGraph, CircuitEdge
@@ -38,12 +39,12 @@ class PySpiceBackend(SimulationBackend):
 
     # Resistance used to represent an open switch / blown fuse
     _OPEN_RESISTANCE = 1e9   # 1 GΩ
-    _WIRE_RESISTANCE = 1e-6  # 1 µΩ  (ideal wire)
+    _WIRE_RESISTANCE = 1e-2  # 10 mΩ  (ideal wire)
 
     def supports_nonlinear(self) -> bool:
         return True
 
-    def solve(self, graph: CircuitGraph) -> SimulationResult:
+    def solve(self, graph: CircuitGraph, logger: Optional[Logger] = None) -> SimulationResult:
         try:
             from PySpice.Spice.Netlist import Circuit
             from PySpice.Spice.NgSpice.Shared import NgSpiceShared
@@ -73,6 +74,9 @@ class PySpiceBackend(SimulationBackend):
         for edge in graph.get_netlist():
             self._add_element(circuit, edge, gnd_id, warnings_list, v_supply)
 
+        if logger:
+            logger.debug(circuit)
+        
         # Run DC operating-point analysis --------------------------------
         simulator = circuit.simulator(temperature=25, nominal_temperature=25)
         try:
@@ -122,7 +126,7 @@ class PySpiceBackend(SimulationBackend):
                 r = self._OPEN_RESISTANCE if params.get("is_blown") else self._WIRE_RESISTANCE
                 i = v_across / r
             elif isinstance(comp, Switch):
-                r = self._WIRE_RESISTANCE if params.get("is_closed") else self._OPEN_RESISTANCE
+                r = params.get("resistance", self._WIRE_RESISTANCE if params.get("is_closed") else self._OPEN_RESISTANCE)
                 i = v_across / r
             elif isinstance(comp, Potentiometer):
                 r = params.get("total_resistance", 1.0) or 1.0
@@ -228,7 +232,7 @@ class PySpiceBackend(SimulationBackend):
             circuit.R(cid, nn(pnodes["p"]), nn(pnodes["n"]), r)
 
         elif isinstance(comp, Switch):
-            r = self._WIRE_RESISTANCE if params.get("is_closed") else self._OPEN_RESISTANCE
+            r = params.get("resistance", self._WIRE_RESISTANCE if params.get("is_closed") else self._OPEN_RESISTANCE)
             circuit.R(cid, nn(pnodes["p"]), nn(pnodes["n"]), r)
 
         elif isinstance(comp, LED):

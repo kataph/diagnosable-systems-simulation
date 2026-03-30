@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from logging import Logger
+from typing import Optional
 
 from diagnosable_systems_simulation.electrical_simulation.circuit import CircuitGraph
 from diagnosable_systems_simulation.electrical_simulation.results import SimulationResult
@@ -18,7 +20,7 @@ class SimulationBackend(ABC):
     """
 
     @abstractmethod
-    def solve(self, graph: CircuitGraph) -> SimulationResult:
+    def solve(self, graph: CircuitGraph, logger: Optional[Logger] = None) -> SimulationResult:
         """
         Perform a DC operating-point analysis of the circuit described
         by ``graph`` and return the result.

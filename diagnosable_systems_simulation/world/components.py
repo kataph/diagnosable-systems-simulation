@@ -236,10 +236,14 @@ class Switch(Component):
         component_id: str,
         display_name: str,
         is_closed: bool = True,
+        ron: float = 1e-6,
+        roff: float = 1e9,
         position: Optional[Position] = None,
         enclosure_id: Optional[str] = None,
     ):
         self.is_closed = is_closed
+        self.ron = ron
+        self.roff = roff
         super().__init__(
             component_id=component_id,
             display_name=display_name,
@@ -255,13 +259,17 @@ class Switch(Component):
         )
 
     def nominal_parameters(self) -> dict[str, Any]:
-        return {"is_closed": self.is_closed}
+        # Nominal state is closed (conducting): resistance = ron
+        return {"is_closed": True, "resistance": self.ron, "ron": self.ron, "roff": self.roff}
 
     def current_parameters(self) -> dict[str, Any]:
         params = super().current_parameters()
         # fault overlay can force is_closed; otherwise use live state
         if "is_closed" not in self._fault_overlay:
             params["is_closed"] = self.is_closed
+        params["resistance"] = self.ron if params["is_closed"] else self.roff
+        params["ron"] = self.ron
+        params["roff"] = self.roff
         return params
 
 
@@ -289,7 +297,7 @@ class Cable(Component):
                 ElectricalPort("n", PortRole.NEGATIVE),
             ],
             affordances=AffordanceSet(
-                static={Affordance.DETACHABLE, Affordance.OBSERVABLE, Affordance.MEASURABLE}
+                static={Affordance.REACHABLE, Affordance.DETACHABLE, Affordance.MEASURABLE}
             ),
             position=position,
             enclosure_id=enclosure_id,
@@ -461,7 +469,7 @@ class PhysicalEnclosure(Component):
             display_name=display_name,
             ports=[],
             affordances=AffordanceSet(
-                static={Affordance.MOVABLE, Affordance.OBSERVABLE}
+                static={Affordance.REACHABLE, Affordance.MOVABLE}
             ),
             position=position,
             enclosure_id=None,
@@ -504,7 +512,7 @@ class Peephole(Component):
             display_name=display_name,
             ports=[],
             affordances=AffordanceSet(
-                static={Affordance.OBSERVABLE},
+                static={Affordance.REACHABLE},
                 conditional=[
                     ConditionalAffordance(
                         Affordance.OPENABLE,
