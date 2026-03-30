@@ -353,7 +353,7 @@ class OpenPeephole(Action):
 
     action_id = "open_peephole"
     description = "Open a peephole to observe internal components."
-    cost = ActionCost(time=10.0)
+    cost = ActionCost(time=5.0)
 
     def check_preconditions(self, targets, context):
         ok, failures = PreconditionChecker.check_all(
@@ -384,7 +384,7 @@ class ClosePeephole(Action):
 
     action_id = "close_peephole"
     description = "Close an open peephole."
-    cost = ActionCost(time=10.0)
+    cost = ActionCost(time=5.0)
 
     def check_preconditions(self, targets, context):
         ok, failures = PreconditionChecker.check_all(

@@ -1,6 +1,14 @@
 """
 Natural language interface: free-text → action list → verbalized results.
 
+IMPORTANT: there are at least two types of action that can be executed on a system: those with the goal of collecting information useful
+for diagnosis, and those with the goal of setting up the system to execute action of the first type 
+(let us call the latter access actions and the former information collecting actions).
+The focus of the assistant evaluation is on planning the information collection actions not the access actions. 
+Therefore, the interface will carry out some minimal auto-planning-correction: 
+Enclosure inversion and peephole opening will be executed automatically if needed. Their cost will then be added to the assistant suggestion cost.
+Not doing this will cause assistant suggestions to randomly fail, whenever the nl interface decides not to map an implict or explicit rquired access action.
+
 Usage::
 
     from nl_interface.interface import run
@@ -213,6 +221,33 @@ def _execute(entries: list[dict], system, allowed_actions: "set[str] | None" = N
             subject_id = entry.get("subject")
             targets = {"subject": system.component(subject_id)} if subject_id else {}
             result = system.apply_action(action, targets)
+            # If the action failed due to a missing affordance, auto-satisfy the
+            # physical prerequisite and retry once.
+            if not result.success and subject_id:
+                comp = targets.get("subject")
+                enclosure_id = getattr(comp, "enclosure_id", None)
+                if enclosure_id and "REACHABLE" in result.message:
+                    enclosure = system.component(enclosure_id)
+                    if enclosure is not None and not getattr(enclosure, "is_inverted", False):
+                        inv_action = InvertEnclosure()
+                        inv_result = system.apply_action(inv_action, {"subject": enclosure})
+                        _logger.info(f"auto-inverted {enclosure_id!r} to satisfy REACHABLE for {subject_id!r}")
+                        results.append((inv_action, inv_result))
+                        result = system.apply_action(action, targets)
+                elif enclosure_id and "OBSERVABLE" in result.message:
+                    from diagnosable_systems_simulation.world.components import Peephole
+                    peephole = next(
+                        (c for c in system.all_components().values()
+                         if isinstance(c, Peephole) and getattr(c, "enclosure_id", None) == enclosure_id
+                         and not c.is_open),
+                        None,
+                    )
+                    if peephole is not None:
+                        ph_action = OpenPeephole()
+                        ph_result = system.apply_action(ph_action, {"subject": peephole})
+                        _logger.info(f"auto-opened peephole {peephole.component_id!r} to satisfy OBSERVABLE for {subject_id!r}")
+                        results.append((ph_action, ph_result))
+                        result = system.apply_action(action, targets)
         except Exception as exc:
             from diagnosable_systems_simulation.actions.base import ActionResult
             result = ActionResult(success=False, message=f"[{action_id}] error: {exc}")
