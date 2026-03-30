@@ -34,17 +34,17 @@ def _nearby_anomalies(comp, graph) -> list[str]:
         seen.add(neighbor.component_id)
 
         # --- Check: disconnected cable end adjacent to comp ---
-        # Triggers if the cable's disconnected port was originally on one of
-        # comp's nodes (direct adjacency), OR if the cable's still-connected
-        # port shares a node with comp (one-hop adjacency — detects upstream
-        # disconnections that make the circuit degenerate).
+        # Triggers only if the cable's disconnected port was originally attached
+        # to one of comp's own terminals (direct adjacency). One-hop adjacency
+        # (cable's live end shares a node with comp) is intentionally excluded:
+        # a cable whose disconnected end is inside a closed enclosure is not
+        # physically visible to a technician working at comp's location.
         if isinstance(neighbor, Cable):
             orig = getattr(neighbor, "_orig_connections", {})
-            cable_live_nodes = {p.node_id for p in neighbor.ports if p.is_connected()}
             for port in neighbor.ports:
                 if port.is_connected():
                     continue
-                if orig.get(port.name) in comp_nodes or cable_live_nodes & comp_nodes:
+                if orig.get(port.name) in comp_nodes:
                     anomalies.append(
                         f"cable '{neighbor.display_name}' has a disconnected end "
                         f"(port '{port.name}' is floating; originally attached to terminal "
