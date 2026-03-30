@@ -74,14 +74,7 @@ class AffordanceSet:
         component: Component,
         context: WorldContext,
     ) -> bool:
-        if affordance in self._static:
-            return True
-        if affordance in self._dynamic:
-            return True
-        return any(
-            ca.affordance == affordance and ca.condition(component, context)
-            for ca in self._conditional
-        )
+        return affordance in self.all_active(component, context)
 
     def all_active(
         self,
