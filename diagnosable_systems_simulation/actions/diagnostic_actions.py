@@ -118,22 +118,12 @@ class MeasureVoltage(Action):
             action_id=self.action_id,
             simulation_snapshot=last_result,
         )
-        # Detect floating ports — a disconnected cable makes the circuit
-        # degenerate; do not expose numerically unstable simulation results.
+        # Report floating ports but still measure connected ones.
+        # A technician can probe any connected terminal; the disconnected
+        # end simply has no node voltage to report.
         floating = [p.name for p in comp.ports if not p.is_connected()]
         if floating:
             record.add("disconnected_ports", str(floating))
-            anomalies = _nearby_anomalies(comp, graph)
-            if anomalies:
-                record.add("nearby_anomalies", "; ".join(anomalies))
-            anomaly_suffix = (" NEARBY ANOMALY: " + "; ".join(anomalies)) if anomalies else ""
-            return ActionResult(
-                observation=record,
-                message=(
-                    f"Cannot meaningfully measure {comp.display_name!r}: "
-                    f"port(s) {floating} are physically disconnected (floating).{anomaly_suffix}"
-                ),
-            )
 
         if last_result is None:
             record.add("note", "No simulation result available.")

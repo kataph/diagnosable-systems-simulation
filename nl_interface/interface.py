@@ -154,7 +154,12 @@ Each action must be:
   {"action_id": "<id>", "subject": "<component_id>", "params": {<constructor kwargs>}}
 If an action has no listed parameters, omit "params" entirely — do NOT include it at all.
 Never add keys to "params" that are not listed in the action's parameter description.
-Return ONLY the JSON array — no markdown fences, no commentary.\
+Return ONLY the JSON array — no markdown fences, no commentary.
+
+Critical rules:
+- Map ONLY the core measurement or observation actions explicitly stated.
+- Do NOT infer or add context actions (e.g. switch operations, enclosure inversions, peephole openings) unless the description mentions them as context ("while the switch is closed", "with the enclosure open", etc.).
+- Do NOT add observe_component unless the instruction explicitly asks to visually inspect a component.\
 """
 
 
