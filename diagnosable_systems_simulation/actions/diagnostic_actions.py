@@ -168,7 +168,7 @@ class OpenSwitch(Action):
     interface: the agent has no access to the current simulation state, so
     a toggle would be ambiguous; a state-targeting action is always safe.
 
-    Requires REACHABLE and TOGGLABLE affordance.
+    Requires TOGGLABLE affordance (no REACHABLE needed — switch is flipped from outside the enclosure).
     targets: {"subject": <Switch component>}
     """
 
@@ -179,10 +179,7 @@ class OpenSwitch(Action):
 
     def check_preconditions(self, targets, context):
         ok, failures = PreconditionChecker.check_all(
-            [
-                AffordanceRequirement("subject", Affordance.REACHABLE),
-                AffordanceRequirement("subject", Affordance.TOGGLABLE),
-            ],
+            [AffordanceRequirement("subject", Affordance.TOGGLABLE)],
             targets, context,
         )
         return ok, "; ".join(failures)
@@ -210,7 +207,7 @@ class CloseSwitch(Action):
     interface: the agent has no access to the current simulation state, so
     a toggle would be ambiguous; a state-targeting action is always safe.
 
-    Requires REACHABLE and TOGGLABLE affordance.
+    Requires TOGGLABLE affordance (no REACHABLE needed — switch is flipped from outside the enclosure).
     targets: {"subject": <Switch component>}
     """
 
@@ -221,10 +218,7 @@ class CloseSwitch(Action):
 
     def check_preconditions(self, targets, context):
         ok, failures = PreconditionChecker.check_all(
-            [
-                AffordanceRequirement("subject", Affordance.REACHABLE),
-                AffordanceRequirement("subject", Affordance.TOGGLABLE),
-            ],
+            [AffordanceRequirement("subject", Affordance.TOGGLABLE)],
             targets, context,
         )
         return ok, "; ".join(failures)

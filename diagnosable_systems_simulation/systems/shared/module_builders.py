@@ -180,7 +180,11 @@ def create_3cubes_control_module(
         position=Position(x, 0.10, 0.05),
     )
     switch.affordances = AffordanceSet(
-        static={Affordance.REACHABLE, Affordance.TOGGLABLE, Affordance.MEASURABLE},
+        static={Affordance.TOGGLABLE, Affordance.MEASURABLE},
+        conditional=[ConditionalAffordance(
+            Affordance.REACHABLE, _when_inverted_only(cube),
+            "reachable when control cube is inverted",
+        )],
     )
     red_led = LED(
         component_id=f"{p}red_led",
@@ -277,7 +281,11 @@ def create_10cubes_control_module(
         position=Position(x, 0.10, 0.05),
     )
     switch.affordances = AffordanceSet(
-        static={Affordance.REACHABLE, Affordance.TOGGLABLE, Affordance.MEASURABLE},
+        static={Affordance.TOGGLABLE, Affordance.MEASURABLE},
+        conditional=[ConditionalAffordance(
+            Affordance.REACHABLE, _when_inverted_only(cube),
+            "reachable when control cube is inverted",
+        )],
     )
     green_led = LED(
         component_id=f"{p}green_led",
