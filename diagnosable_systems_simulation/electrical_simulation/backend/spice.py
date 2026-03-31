@@ -174,6 +174,56 @@ class PySpiceBackend(SimulationBackend):
         )
 
     # ------------------------------------------------------------------
+    # Path-continuity probe (Thevenin resistance between two nodes)
+    # ------------------------------------------------------------------
+
+    def solve_continuity(self, graph, node_a: str, node_b: str, logger=None) -> float:
+        """
+        Inject a 1 mV test source between *node_a* and *node_b* with all
+        independent voltage sources zeroed (short-circuit) and return
+        R = 0.001 / |I_test|.  Returns 1e9 on open circuit or solve failure.
+        """
+        try:
+            from PySpice.Spice.Netlist import Circuit
+        except ImportError as exc:
+            raise ImportError("PySpice is not installed.") from exc
+
+        circuit = Circuit("continuity_test")
+        gnd_id = graph.ground_node().node_id
+        nn = lambda nid: "0" if nid == gnd_id else nid  # noqa: E731
+        warnings_list: list[str] = []
+
+        for edge in graph.get_netlist():
+            comp = edge.component
+            pnodes = edge.port_nodes
+            if not pnodes:
+                continue
+            if isinstance(comp, VoltageSource):
+                # Zero the source → 0 V ideal short
+                circuit.V(comp.component_id, nn(pnodes["pos"]), nn(pnodes["neg"]), 0)
+            else:
+                self._add_element(circuit, edge, gnd_id, warnings_list, v_supply=0.0)
+
+        test_v = 0.001  # 1 mV
+        circuit.V("test", nn(node_a), nn(node_b), test_v)
+
+        if logger:
+            logger.debug(f"Continuity-test netlist ({node_a} → {node_b}):\n{circuit}")
+
+        simulator = circuit.simulator(temperature=25, nominal_temperature=25)
+        try:
+            analysis = simulator.operating_point()
+        except Exception:
+            return 1e9
+
+        try:
+            i_test = abs(float(analysis.branches["vtest"].item()))
+        except (KeyError, Exception):
+            return 1e9
+
+        return (test_v / i_test) if i_test > 1e-15 else 1e9
+
+    # ------------------------------------------------------------------
     # Internal translation helpers
     # ------------------------------------------------------------------
 

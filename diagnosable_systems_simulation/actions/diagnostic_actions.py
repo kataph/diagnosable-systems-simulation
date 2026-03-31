@@ -45,11 +45,26 @@ def _nearby_anomalies(comp, graph) -> list[str]:
                 if port.is_connected():
                     continue
                 if orig.get(port.name) in comp_nodes:
-                    anomalies.append(
-                        f"cable '{neighbor.display_name}' has a disconnected end "
-                        f"(port '{port.name}' is floating; originally attached to terminal "
-                        f"'{orig.get(port.name, 'unknown')}')"
-                    )
+                    orig_node = orig.get(port.name)
+                    connected_names = [
+                        e.component.display_name
+                        for e in graph.get_netlist()
+                        if orig_node in e.port_nodes.values()
+                        and e.component.component_id != neighbor.component_id
+                    ]
+                    if connected_names:
+                        conn_str = ", ".join(f"'{n}'" for n in connected_names)
+                        msg = (
+                            f"cable '{neighbor.display_name}' has a disconnected end "
+                            f"(port '{port.name}' is floating; "
+                            f"originally electrically connected to {conn_str})"
+                        )
+                    else:
+                        msg = (
+                            f"cable '{neighbor.display_name}' has a disconnected end "
+                            f"(port '{port.name}' is floating)"
+                        )
+                    anomalies.append(msg)
 
         # --- Future checks can be added here ---
         # e.g. blown fuse on adjacent node, degraded component visible at terminal, …
@@ -88,16 +103,16 @@ class ObserveComponent(Action):
 
 class MeasureVoltage(Action):
     """
-    Measure voltage at a component's ports using a multimeter.
+    Measure voltage at a component's ports (w.r.t. ground) using a multimeter.
 
     Requires REACHABLE and MEASURABLE affordance and "multimeter" in tools_in_hand.
-    Returns an ObservationRecord with port voltages and branch current.
+    Returns an ObservationRecord with port voltages only.
 
     targets: {"subject": <any Component>}
     """
 
     action_id = "measure_voltage"
-    description = "Measure voltage at component ports with a multimeter."
+    description = "Measure voltage at component ports (w.r.t. ground) with a multimeter."
     cost = ActionCost(time=20.0, equipment=["multimeter"])
 
     def check_preconditions(self, targets, context):
@@ -119,8 +134,6 @@ class MeasureVoltage(Action):
             simulation_snapshot=last_result,
         )
         # Report floating ports but still measure connected ones.
-        # A technician can probe any connected terminal; the disconnected
-        # end simply has no node voltage to report.
         floating = [p.name for p in comp.ports if not p.is_connected()]
         if floating:
             record.add("disconnected_ports", str(floating))
@@ -133,16 +146,65 @@ class MeasureVoltage(Action):
                     v = last_result.voltage(port.node_id)
                     if v is not None:
                         record.add(f"voltage_{port.name}", round(v, 4), "V")
-            i = last_result.current(comp.component_id)
-            if i is not None:
-                record.add("current", round(i, 6), "A")
         anomalies = _nearby_anomalies(comp, graph)
         if anomalies:
             record.add("nearby_anomalies", "; ".join(anomalies))
         anomaly_suffix = (" NEARBY ANOMALY: " + "; ".join(anomalies)) if anomalies else ""
         return ActionResult(
             observation=record,
-            message=f"Measured {comp.display_name!r}.{anomaly_suffix}",
+            message=f"Measured voltage at {comp.display_name!r}.{anomaly_suffix}",
+        )
+
+
+class MeasureCurrent(Action):
+    """
+    Measure the branch current through a component using a multimeter (ammeter mode).
+
+    Requires REACHABLE and MEASURABLE affordance and "multimeter" in tools_in_hand.
+    Returns an ObservationRecord with the branch current only.
+
+    targets: {"subject": <any Component>}
+    """
+
+    action_id = "measure_current"
+    description = "Measure the branch current through a component with a multimeter (ammeter mode)."
+    cost = ActionCost(time=20.0, equipment=["multimeter"])
+
+    def check_preconditions(self, targets, context):
+        ok, failures = PreconditionChecker.check_all(
+            [
+                AffordanceRequirement("subject", Affordance.REACHABLE),
+                AffordanceRequirement("subject", Affordance.MEASURABLE),
+                ToolRequirement("multimeter"),
+            ],
+            targets, context,
+        )
+        return ok, "; ".join(failures)
+
+    def execute(self, targets, graph, context, last_result):
+        comp = targets["subject"]
+        record = ObservationRecord(
+            component_id=comp.component_id,
+            action_id=self.action_id,
+            simulation_snapshot=last_result,
+        )
+        if last_result is None:
+            record.add("note", "No simulation result available.")
+            return ActionResult(
+                observation=record,
+                message=f"Measured current through {comp.display_name!r}: no simulation result available.",
+            )
+        i = last_result.current(comp.component_id)
+        if i is not None:
+            record.add("current", round(i, 6), "A")
+            return ActionResult(
+                observation=record,
+                message=f"Current through {comp.display_name!r}: {i:.6f} A.",
+            )
+        record.add("note", "Current not available for this component.")
+        return ActionResult(
+            observation=record,
+            message=f"Current measurement not available for {comp.display_name!r}.",
         )
 
 
@@ -434,13 +496,28 @@ class AdjustPotentiometer(Action):
 
 class TestContinuity(Action):
     """
-    Test resistance / continuity of a component using a multimeter in ohmmeter mode.
+    Test the internal resistance of a single component by placing one probe on
+    each of its two terminals (ohmmeter mode).
+
+    This measures **only the component itself** — not the circuit path around it.
+    It is equivalent to desoldering the component and measuring it in isolation:
+    parallel paths in the live circuit do not affect the reading, because the
+    probes are placed directly across the component's own terminals.
 
     Requires REACHABLE and MEASURABLE affordance and "multimeter" in tools_in_hand.
 
     Compares ``current_parameters()["resistance"]`` against the nominal value and
     reports one of: nominal / open circuit (R > 1 MΩ) / short circuit (R < 0.01 Ω) /
     degraded.
+
+    If a port is floating (cable end disconnected from the circuit), the action
+    still reads the component's own resistance normally — the cable wire itself
+    is still intact and conducting. The floating port is surfaced as a NEARBY
+    ANOMALY, because a technician holding the probes would physically see the
+    dangling end.
+
+    For testing continuity **between two arbitrary points** in the circuit
+    (a point-to-point path check), use ``TestPathContinuity`` instead.
 
     targets: {"subject": <any Component with a "resistance" parameter>}
     """
@@ -470,23 +547,6 @@ class TestContinuity(Action):
             action_id=self.action_id,
         )
 
-        # Detect physically disconnected ports (node_id is None) before reading resistance.
-        # A cable whose ports are floating is an open circuit regardless of its nominal resistance.
-        floating = [p.name for p in comp.ports if not p.is_connected()]
-        if floating:
-            r_nom = nominal.get("resistance", 0.0)
-            record.add("resistance_measured", round(1e9, 0), "Ω")
-            record.add("resistance_nominal", round(r_nom, 4), "Ω")
-            record.add("status", "open circuit")
-            return ActionResult(
-                observation=record,
-                message=(
-                    f"'{comp.display_name}' continuity: open circuit"
-                    f" — the component is physically disconnected from the circuit"
-                    f" (floating ports: {floating})."
-                ),
-            )
-
         if "resistance" not in params:
             record.add("note", "Component has no resistance parameter.")
             return ActionResult(
@@ -511,13 +571,162 @@ class TestContinuity(Action):
             status = "degraded"
 
         record.add("status", status)
+
         anomalies = _nearby_anomalies(comp, graph)
+        # A floating port on the component itself means one of its own cable ends
+        # is disconnected. A technician probing the component would physically
+        # notice this (dangling wire end), so it is surfaced as an anomaly.
+        floating = [p.name for p in comp.ports if not p.is_connected()]
+        if floating:
+            record.add("disconnected_ports", str(floating))
+            anomalies = [
+                f"port(s) {floating} are floating — this component's cable end is disconnected from the circuit"
+            ] + anomalies
         if anomalies:
             record.add("nearby_anomalies", "; ".join(anomalies))
         anomaly_suffix = (" NEARBY ANOMALY: " + "; ".join(anomalies)) if anomalies else ""
         return ActionResult(
             observation=record,
             message=f"{comp.display_name!r} continuity: {status} (R={r_now:.2f} Ω, nominal={r_nom:.2f} Ω).{anomaly_suffix}",
+        )
+
+
+class TestPathContinuity(Action):
+    """
+    Test the Thevenin resistance of the conductive path between two
+    arbitrary circuit points using a multimeter (ohmmeter mode).
+
+    Unlike ``TestContinuity`` (which probes across a single component),
+    this places one probe on a terminal of *source* and the other on a
+    terminal of *sink*, measuring the total resistance of the path between
+    them — including all series elements and parallel shortcuts.
+
+    The measurement simulates a de-energised circuit (all independent
+    voltage sources zeroed, as with a real ohmmeter) by injecting a 1 mV
+    test source between the two probe nodes and measuring the resulting
+    current: R = 0.001 / |I_test|.
+
+    Classification:
+      - R < 1 Ω  → **short** (continuous, low-resistance path)
+      - 1–1 MΩ   → **resistive** (path exists but high resistance)
+      - R ≥ 1 MΩ → **open circuit** (no conductive path)
+
+    Requires REACHABLE + MEASURABLE on both *source* and *sink*, and
+    "multimeter" in tools_in_hand.
+
+    Optional constructor kwargs
+    ---------------------------
+    source_port : str
+        Port name on the source component to probe (default: first
+        connected port, then first port overall).
+    sink_port : str
+        Port name on the sink component to probe (default: same rule).
+
+    targets: {"source": <Component>, "sink": <Component>}
+    """
+
+    action_id = "test_path_continuity"
+    description = (
+        "Measure the Thevenin resistance between a terminal of one component "
+        "and a terminal of another (point-to-point continuity test)."
+    )
+    cost = ActionCost(time=30.0, equipment=["multimeter"])
+
+    def __init__(self, source_port: str = "", sink_port: str = ""):
+        self.source_port = source_port
+        self.sink_port = sink_port
+
+    def check_preconditions(self, targets, context):
+        ok, failures = PreconditionChecker.check_all(
+            [
+                AffordanceRequirement("source", Affordance.REACHABLE),
+                AffordanceRequirement("source", Affordance.MEASURABLE),
+                AffordanceRequirement("sink", Affordance.REACHABLE),
+                AffordanceRequirement("sink", Affordance.MEASURABLE),
+                ToolRequirement("multimeter"),
+            ],
+            targets, context,
+        )
+        return ok, "; ".join(failures)
+
+    @staticmethod
+    def _pick_node(comp, preferred_port: str) -> "str | None":
+        """Return node_id for *preferred_port*, or the first connected port."""
+        if preferred_port:
+            p = next((p for p in comp.ports if p.name == preferred_port), None)
+            if p is not None:
+                return p.node_id
+        # Fall back to first connected port, then first port overall
+        for p in comp.ports:
+            if p.is_connected():
+                return p.node_id
+        return comp.ports[0].node_id if comp.ports else None
+
+    def execute(self, targets, graph, context, last_result):
+        source = targets["source"]
+        sink = targets["sink"]
+
+        record = ObservationRecord(
+            component_id=f"{source.component_id}_to_{sink.component_id}",
+            action_id=self.action_id,
+        )
+
+        node_a = self._pick_node(source, self.source_port)
+        node_b = self._pick_node(sink, self.sink_port)
+
+        record.add("source", source.display_name)
+        record.add("sink", sink.display_name)
+        record.add("probe_node_source", str(node_a))
+        record.add("probe_node_sink", str(node_b))
+
+        if node_a is None or node_b is None:
+            record.add("status", "open circuit")
+            record.add("note", "One or both probe nodes are unresolvable.")
+            return ActionResult(
+                observation=record,
+                message=(
+                    f"Path continuity {source.display_name!r} → {sink.display_name!r}: "
+                    f"open circuit (probe node unresolvable)."
+                ),
+            )
+
+        if node_a == node_b:
+            record.add("resistance", 0.0, "Ω")
+            record.add("status", "short")
+            return ActionResult(
+                observation=record,
+                message=(
+                    f"Path continuity {source.display_name!r} → {sink.display_name!r}: "
+                    f"short — both probes are on the same circuit node."
+                ),
+            )
+
+        backend = context.extra.get("backend")
+        if backend is None:
+            record.add("note", "No backend available for path continuity measurement.")
+            return ActionResult(
+                observation=record,
+                success=False,
+                message="test_path_continuity requires a simulation backend.",
+            )
+
+        r = backend.solve_continuity(graph, node_a, node_b)
+        record.add("resistance", round(r, 4), "Ω")
+
+        if r < 1.0:
+            status = "short"
+        elif r < 1e6:
+            status = "resistive"
+        else:
+            status = "open circuit"
+        record.add("status", status)
+
+        return ActionResult(
+            observation=record,
+            message=(
+                f"Path continuity {source.display_name!r} → {sink.display_name!r}: "
+                f"{status} (R={r:.2f} Ω)."
+            ),
         )
 
 

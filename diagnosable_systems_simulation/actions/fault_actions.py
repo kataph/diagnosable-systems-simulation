@@ -56,17 +56,23 @@ class ReconnectCable(Action):
     """
     Reconnect a previously detached cable.
 
-    targets: {"cable": <Cable>}
-    connections: port name -> node_id
+    If *connections* is omitted (or empty), the cable is restored to its
+    original wiring using the ``_orig_connections`` dict saved by
+    ``DisconnectCable``.  This is the normal diagnostic use-case: a
+    technician puts the cable back where it was without needing to know
+    the underlying node IDs.
+
+    targets: {"subject": <Cable>}
+    connections: optional port name -> node_id override
     """
 
     action_id = "reconnect_cable"
-    description = "Reconnect a detached cable to specified nodes."
+    description = "Reconnect a detached cable to its original position (or to specified nodes)."
     cost = ActionCost(time=40.0)
     mutates_graph = True
 
-    def __init__(self, connections: dict[str, str]):
-        self.connections = connections
+    def __init__(self, connections: dict[str, str] | None = None):
+        self.connections = connections or {}
 
     def check_preconditions(self, targets, context):
         ok, failures = PreconditionChecker.check_all(
@@ -77,11 +83,20 @@ class ReconnectCable(Action):
 
     def execute(self, targets, graph, context, last_result):
         cable = targets["subject"]
-        for port_name, node_id in self.connections.items():
+        connections = self.connections or getattr(cable, "_orig_connections", {})
+        if not connections:
+            return ActionResult(
+                success=False,
+                message=(
+                    f"Cannot reconnect {cable.display_name!r}: no connections specified "
+                    f"and no original connection data available."
+                ),
+            )
+        for port_name, node_id in connections.items():
             graph.reconnect_port(cable.component_id, port_name, node_id)
         cable.affordances.remove(Affordance.RECONNECTABLE)
         cable.affordances.add(Affordance.DETACHABLE)
-        return ActionResult(message=f"Reconnected {cable.display_name!r}: {self.connections}.")
+        return ActionResult(message=f"Reconnected {cable.display_name!r} to original position.")
 
 
 class ShortCircuit(Action):

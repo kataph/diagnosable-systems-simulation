@@ -109,6 +109,8 @@ class DiagnosableSystem:
         self._context = context
         self._runner = runner
         self._last_result: Optional[SimulationResult] = None
+        # Make the backend accessible to actions via context.extra
+        self._context.extra.setdefault("backend", self._runner.backend)
 
     # ------------------------------------------------------------------
     # Simulation

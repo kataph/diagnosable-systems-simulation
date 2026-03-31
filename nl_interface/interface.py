@@ -33,8 +33,9 @@ import anthropic, openai
 from diagnosable_systems_simulation.actions.base import ActionCost
 from diagnosable_systems_simulation.actions.diagnostic_actions import (
     AdjustPotentiometer, ClosePeephole, InspectConnections, InvertEnclosure,
-    MeasureVoltage, ObserveComponent, OpenPeephole, ReplaceComponent,
-    CloseSwitch, OpenSwitch, RestoreEnclosure, TestContinuity, TestDiode, VerifyRepair,
+    MeasureCurrent, MeasureVoltage, ObserveComponent, OpenPeephole, ReplaceComponent,
+    CloseSwitch, OpenSwitch, RestoreEnclosure, TestContinuity, TestDiode,
+    TestPathContinuity, VerifyRepair,
 )
 from diagnosable_systems_simulation.actions.fault_actions import (
     DegradeComponent, DisconnectCable, ForceSwitch, ReconnectCable,
@@ -54,10 +55,15 @@ BACKEND: Backend = "openai"
 _REGISTRY: dict[str, tuple] = {
     "observe_component":   (ObserveComponent,   {}),
     "measure_voltage":     (MeasureVoltage,     {}),
+    "measure_current":     (MeasureCurrent,     {}),
     "open_switch":         (OpenSwitch,         {}),
     "close_switch":        (CloseSwitch,        {}),
     "test_continuity":     (TestContinuity,     {}),
     "test_diode":          (TestDiode,          {}),
+    "test_path_continuity": (TestPathContinuity, {
+        "source_port": "str — port name on source component to probe (optional)",
+        "sink_port":   "str — port name on sink component to probe (optional)",
+    }),
     "inspect_connections": (InspectConnections, {}),
     "invert_enclosure":    (InvertEnclosure,    {}),
     "restore_enclosure":   (RestoreEnclosure,   {}),
@@ -74,7 +80,7 @@ _REGISTRY: dict[str, tuple] = {
         "port_names": "list[str] — port names to disconnect, e.g. ['n']; null = all ports",
     }),
     "reconnect_cable":     (ReconnectCable,     {
-        "connections": "dict[str, str] — maps port_name to node_id (e.g. {'n': 'net_4'})",
+        "connections": "dict[str, str] — optional: maps port_name to node_id; omit to restore original wiring",
     }),
     "degrade_component":   (DegradeComponent,   {
         "overrides": "dict — parameter overrides, e.g. {'resistance': 1e9} or {'voltage': 0.0}",
@@ -138,10 +144,12 @@ def _action_menu(registry: "dict | None" = None) -> str:
 
 def _component_menu(system) -> str:
     from diagnosable_systems_simulation.world.knowledge_graph import EntityType
-    return "\n".join(
-        f"- {cid}: {c.display_name}"
-        for cid, c in system.kg.entities_of_type(EntityType.COMPONENT).items()
-    )
+    lines = []
+    for cid, c in system.kg.entities_of_type(EntityType.COMPONENT).items():
+        enclosure_id = getattr(c, "enclosure_id", None)
+        enclosure_note = f" [inside enclosure: {enclosure_id}]" if enclosure_id else ""
+        lines.append(f"- {cid}: {c.display_name}{enclosure_note}")
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -155,6 +163,9 @@ Each action must be:
 If an action has no listed parameters, omit "params" entirely — do NOT include it at all.
 Never add keys to "params" that are not listed in the action's parameter description.
 Return ONLY the JSON array — no markdown fences, no commentary.
+
+Exception — test_path_continuity uses TWO component targets instead of "subject":
+  {"action_id": "test_path_continuity", "source": "<component_id>", "sink": "<component_id>", "params": {<optional port kwargs>}}
 
 Critical rules:
 - Map ONLY the core measurement or observation actions explicitly stated.
@@ -224,7 +235,15 @@ def _execute(entries: list[dict], system, allowed_actions: "set[str] | None" = N
         try:
             action = _instantiate(entry)
             subject_id = entry.get("subject")
-            targets = {"subject": system.component(subject_id)} if subject_id else {}
+            source_id  = entry.get("source")
+            sink_id    = entry.get("sink")
+            if source_id and sink_id:
+                targets = {
+                    "source": system.component(source_id),
+                    "sink":   system.component(sink_id),
+                }
+            else:
+                targets = {"subject": system.component(subject_id)} if subject_id else {}
             result = system.apply_action(action, targets)
             # If the action failed due to a missing affordance, auto-satisfy the
             # physical prerequisite and retry once.
@@ -268,7 +287,7 @@ def _execute(entries: list[dict], system, allowed_actions: "set[str] | None" = N
 def _verbalize(results: list[tuple], original_text: str, model: str = MODEL) -> str:
     lines = []
     for action, result in results:
-        lines.append(f"action_id: {action.action_id}, action_description: {original_text}, success: {result.success}, message: {result.message}")
+        lines.append(f"action_id: {action.action_id}, success: {result.success}, message: {result.message}")
         if result.observation:
             for p in result.observation.properties:
                 unit = f" {p.unit}" if p.unit else ""

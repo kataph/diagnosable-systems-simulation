@@ -15,7 +15,7 @@ import pytest
 
 from diagnosable_systems_simulation.electrical_simulation.backend.stub import StubBackend
 from diagnosable_systems_simulation.systems.three_cubes.factory import build_three_cubes_system
-from diagnosable_systems_simulation.actions.diagnostic_actions import CloseSwitch, MeasureVoltage, OpenSwitch
+from diagnosable_systems_simulation.actions.diagnostic_actions import CloseSwitch, MeasureVoltage, OpenSwitch, TestContinuity
 from diagnosable_systems_simulation.actions.fault_actions import (
     DegradeComponent, DisconnectCable, ForceSwitch, ReconnectCable,
 )
@@ -288,3 +288,47 @@ class TestCableRoundTrip:
         s.inject_fault(ReconnectCable(connections={"n": node}),
                        {"subject": s.component("psu_cable_pos")})
         assert s.last_result.is_lit("main_bulb"), "Lamp ON after reconnect"
+
+
+# ---------------------------------------------------------------------------
+# 8. TestContinuity on a disconnected cable
+# ---------------------------------------------------------------------------
+
+class TestContinuityDisconnectedCable:
+    """
+    A continuity test on a cable with a floating port must:
+      - Report the cable's own resistance (nominal, ~0 Ω) — NOT open circuit.
+        A technician probing both physical ends of an intact cable measures
+        the cable itself, regardless of whether it is plugged into the circuit.
+      - Surface a NEARBY ANOMALY warning about the floating port, because
+        a technician at that location would physically notice the dangling end.
+    """
+
+    def test_floating_cable_reads_nominal_resistance(self, backend):
+        s = build_three_cubes_system(backend=backend, extra_tools={"multimeter"})
+        s.inject_fault(DisconnectCable(port_names=["p"]),
+                       {"subject": s.component("ctrl_cable_out_pos")})
+
+        cable = s.component("ctrl_cable_out_pos")
+        result = s.apply_action(TestContinuity(), {"subject": cable})
+
+        assert result.success, f"TestContinuity failed: {result.message}"
+        props = {p.name: p.value for p in result.observation.properties}
+        assert props.get("status") != "open circuit", (
+            "Disconnected cable should NOT report open circuit — "
+            "the cable itself is intact; only its circuit connection is broken."
+        )
+
+    def test_floating_cable_triggers_anomaly_warning(self, backend):
+        s = build_three_cubes_system(backend=backend, extra_tools={"multimeter"})
+        s.inject_fault(DisconnectCable(port_names=["p"]),
+                       {"subject": s.component("ctrl_cable_out_pos")})
+
+        cable = s.component("ctrl_cable_out_pos")
+        result = s.apply_action(TestContinuity(), {"subject": cable})
+
+        assert result.success, f"TestContinuity failed: {result.message}"
+        assert "NEARBY ANOMALY" in result.message, (
+            "Continuity test on a cable with a floating port must include a "
+            "NEARBY ANOMALY warning — technician would physically see the dangling end."
+        )

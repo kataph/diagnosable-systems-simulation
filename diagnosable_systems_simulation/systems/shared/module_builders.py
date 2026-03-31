@@ -178,6 +178,7 @@ def create_3cubes_control_module(
         display_name="Control Switch",
         is_closed=True,
         position=Position(x, 0.10, 0.05),
+        enclosure_id=f"cube_{prefix}",
     )
     switch.affordances = AffordanceSet(
         static={Affordance.TOGGLABLE, Affordance.MEASURABLE},
@@ -279,6 +280,7 @@ def create_10cubes_control_module(
         display_name=f"Control Switch{lbl}",
         is_closed=True,
         position=Position(x, 0.10, 0.05),
+        enclosure_id=f"cube_{prefix}",
     )
     switch.affordances = AffordanceSet(
         static={Affordance.TOGGLABLE, Affordance.MEASURABLE},

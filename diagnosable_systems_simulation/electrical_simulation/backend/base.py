@@ -35,5 +35,26 @@ class SimulationBackend(ABC):
         """
         ...
 
+    def solve_continuity(
+        self,
+        graph: CircuitGraph,
+        node_a: str,
+        node_b: str,
+        logger: Optional[Logger] = None,
+    ) -> float:
+        """
+        Return the Thevenin resistance (Ω) seen between *node_a* and *node_b*
+        with all independent sources zeroed (de-energised circuit, as a real
+        ohmmeter measures).
+
+        Implemented by injecting a 1 mV test voltage source between the two
+        nodes and returning R = V_test / I_test from the DC operating point.
+
+        Returns 1e9 (1 GΩ) when the path is open or the solve fails.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not implement solve_continuity."
+        )
+
     def name(self) -> str:
         return type(self).__name__

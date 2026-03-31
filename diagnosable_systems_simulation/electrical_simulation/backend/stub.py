@@ -34,7 +34,103 @@ class StubBackend(SimulationBackend):
     def supports_nonlinear(self) -> bool:
         return False  # linearised model
 
-    def solve(self, graph: CircuitGraph) -> SimulationResult:
+    def solve_continuity(self, graph: CircuitGraph, node_a: str, node_b: str, logger=None) -> float:
+        """
+        MNA-based Thevenin resistance between *node_a* and *node_b*.
+
+        All independent voltage sources are zeroed (V=0, i.e. stamped as
+        ideal shorts). A 1 mV test voltage source is stamped between the
+        two target nodes. Returns R = 0.001 / |I_test|, or 1e9 if open.
+        """
+        ground = graph.ground_node()
+        if ground is None or node_a is None or node_b is None:
+            return 1e9
+
+        gnd_id = ground.node_id
+        non_gnd = [n for n in graph.get_nodes() if not n.is_ground]
+        n_nodes = len(non_gnd)
+        node_idx = {n.node_id: i for i, n in enumerate(non_gnd)}
+
+        real_v_sources = [
+            e for e in graph.get_netlist()
+            if isinstance(e.component, VoltageSource) and e.port_nodes
+        ]
+        # One extra row for the test voltage source
+        vsrc_idx = {e.component_id: n_nodes + i for i, e in enumerate(real_v_sources)}
+        test_row = n_nodes + len(real_v_sources)
+        size = n_nodes + len(real_v_sources) + 1
+
+        G = np.zeros((size, size))
+        b = np.zeros(size)
+
+        def nidx(nid: str):
+            return None if nid == gnd_id else node_idx.get(nid)
+
+        def stamp_r(na: str, nb: str, conductance: float) -> None:
+            ia, ib = nidx(na), nidx(nb)
+            if ia is not None:
+                G[ia, ia] += conductance
+            if ib is not None:
+                G[ib, ib] += conductance
+            if ia is not None and ib is not None:
+                G[ia, ib] -= conductance
+                G[ib, ia] -= conductance
+
+        def stamp_v(row: int, np_: str, nn_: str, v: float) -> None:
+            ip, in_ = nidx(np_), nidx(nn_)
+            if ip is not None:
+                G[row, ip] = 1.0
+                G[ip, row] = 1.0
+            if in_ is not None:
+                G[row, in_] = -1.0
+                G[in_, row] = -1.0
+            b[row] = v
+
+        for edge in graph.get_netlist():
+            comp = edge.component
+            params = comp.current_parameters()
+            pn = edge.port_nodes
+            if not pn:
+                continue
+            try:
+                if isinstance(comp, VoltageSource):
+                    # Zero the source
+                    row = vsrc_idx[comp.component_id]
+                    stamp_v(row, pn["pos"], pn["neg"], 0.0)
+                elif isinstance(comp, (Resistor, Cable, Bulb, LightSensor)):
+                    r = params.get("resistance", _WIRE) or _WIRE
+                    stamp_r(pn["p"], pn["n"], 1.0 / r)
+                elif isinstance(comp, Fuse):
+                    r = _OPEN if params.get("is_blown") else _WIRE
+                    stamp_r(pn["p"], pn["n"], 1.0 / r)
+                elif isinstance(comp, Switch):
+                    r = params.get("resistance", _WIRE if params.get("is_closed") else _OPEN)
+                    stamp_r(pn["p"], pn["n"], 1.0 / r)
+                elif isinstance(comp, (LED, Diode)):
+                    # Treat as open — no forward bias without supply
+                    stamp_r(pn.get("anode", ""), pn.get("cathode", ""), 1.0 / _OPEN)
+                elif isinstance(comp, Potentiometer):
+                    total_r = params.get("total_resistance", 1000.0) or 1000.0
+                    wiper = params.get("wiper_position", 0.5)
+                    wiper_node = pn.get("wiper", f"_w_{comp.component_id}")
+                    stamp_r(pn["p"], wiper_node, 1.0 / max(total_r * wiper, _WIRE))
+                    stamp_r(wiper_node, pn["n"], 1.0 / max(total_r * (1 - wiper), _WIRE))
+            except KeyError:
+                pass  # disconnected port — skip
+
+        # Stamp 1 mV test source between node_a and node_b
+        test_v = 0.001
+        stamp_v(test_row, node_a, node_b, test_v)
+
+        try:
+            x = np.linalg.solve(G, b)
+        except np.linalg.LinAlgError:
+            return 1e9
+
+        i_test = abs(float(x[test_row]))
+        return (test_v / i_test) if i_test > 1e-15 else 1e9
+
+    def solve(self, graph: CircuitGraph, logger=None) -> SimulationResult:
         ground = graph.ground_node()
         if ground is None:
             return SimulationResult(converged=False, warnings=("No ground node.",))
