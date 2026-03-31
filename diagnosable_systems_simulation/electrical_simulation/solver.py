@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from logging import Logger
 from typing import Optional
 
 from diagnosable_systems_simulation.electrical_simulation.backend.base import SimulationBackend

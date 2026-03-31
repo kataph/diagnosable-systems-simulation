@@ -295,19 +295,47 @@ class DiagnosableSystem:
     # Hypothesis-verification helper
     # ------------------------------------------------------------------
 
-    def repair_component(
+    def apply_repairs(self, component_ids: "set[str]") -> None:
+        """
+        Physically repair components in the live circuit without simulating
+        or restoring any snapshot.
+
+        For each component ID:
+          - Cables: floating ports are reconnected to their original nodes
+            (from ``_orig_connections``).
+          - Components with a fault overlay: the overlay is cleared.
+
+        Use this to persist confirmed repairs between partial hypothesis
+        verifications, so that ``restore_snapshot(exclude_ids=repaired)``
+        leaves those components in the repaired state rather than the
+        fault state they were in when ``test_repair()`` last exited.
+        """
+        from diagnosable_systems_simulation.world.components import Cable
+        for cid in component_ids:
+            try:
+                comp = self.component(cid)
+            except KeyError:
+                continue
+            if isinstance(comp, Cable):
+                orig = getattr(comp, "_orig_connections", {})
+                for port_name, node_id in orig.items():
+                    if not comp.port(port_name).is_connected():
+                        self._graph.reconnect_port(cid, port_name, node_id)
+            if comp._fault_overlay:
+                comp._fault_overlay.clear()
+
+    def test_repair(
         self,
         component_ids: "set[str]",
         *,
         already_repaired_ids: "set[str] | None" = None,
     ) -> bool:
         """
-        Reset to the post-fault snapshot, apply repairs to *component_ids*,
-        re-simulate, and return True if every component that was lit in the
-        nominal (pre-fault) state is lit again.
+        Temporarily repair *component_ids*, re-simulate, and return True if
+        every component that was lit in the nominal (pre-fault) state is lit.
 
-        The circuit is restored to the fault state before returning, so
-        the caller sees no side-effects.
+        The circuit is always restored to the fault state before returning,
+        so the caller sees no persistent side-effects.
 
         Parameters
         ----------
@@ -317,9 +345,9 @@ class DiagnosableSystem:
                 original nodes (taken from ``_orig_connections``).
               - components with a fault overlay: the overlay is cleared.
         already_repaired_ids:
-            Components that were confirmed repaired in previous partial
-            verifications; they are excluded from the snapshot restore so
-            they remain fixed during the test.
+            Components confirmed repaired in previous partial verifications;
+            excluded from the snapshot restore so they remain fixed during
+            the test.
         """
         from diagnosable_systems_simulation.world.components import Cable
 

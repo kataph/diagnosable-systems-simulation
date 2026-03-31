@@ -866,7 +866,7 @@ class VerifyRepair(Action):
     The NL interface resolves a free-text fault hypothesis to a concrete
     component ID by mapping it to this action.  Execution is intentionally
     a no-op: the service agent reads the resolved ``subject`` ID from the
-    parsed action entry and calls ``DiagnosableSystem.repair_component()``.
+    parsed action entry and calls ``DiagnosableSystem.test_repair()``.
 
     targets: {"subject": <any Component>}
     """
