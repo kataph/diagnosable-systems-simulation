@@ -83,7 +83,7 @@ _REGISTRY: dict[str, tuple] = {
         "connections": "dict[str, str] — optional: maps port_name to node_id; omit to restore original wiring",
     }),
     "degrade_component":   (DegradeComponent,   {
-        "overrides": "dict — parameter overrides, e.g. {'resistance': 1e9} or {'voltage': 0.0}",
+        "degradation": "dict — parameter overrides, e.g. {'resistance': 1e9} or {'voltage': 0.0}",
     }),
     "force_switch":        (ForceSwitch,        {
         "is_closed": "bool — true = permanently closed, false = permanently open",
@@ -352,14 +352,14 @@ def run(text: str, system: DiagnosableSystem, model: str = MODEL, allowed_action
     entries = _parse(text, system, model, allowed_actions)
     results = _execute(entries, system, allowed_actions)
 
+    resources: dict[str, float] = {}
+    for a, _ in results:
+        for k, v in a.cost.resources_consumed.items():
+            resources[k] = resources.get(k, 0) + v
     total = ActionCost(
         time=sum(a.cost.time for a, _ in results),
         equipment=list({e for a, _ in results for e in a.cost.equipment}),
-        resources_consumed={
-            k: v
-            for a, _ in results
-            for k, v in a.cost.resources_consumed.items()
-        },
+        resources_consumed=resources,
     )
         
     return _verbalize(results=results, original_text=text, model=model), total, entries, results

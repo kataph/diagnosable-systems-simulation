@@ -845,7 +845,7 @@ class InspectConnections(Action):
             else:
                 cables = node_cables.get(node_id, [])
                 cable_str = ", ".join(cables) if cables else "no cable"
-                lines.append(f"port '{port.name}' → node {node_id!r}: {cable_str}")
+                lines.append(f"port '{port.name}': {cable_str}")
                 record.add(f"port_{port.name}", cable_str)
 
         summary = "; ".join(lines)

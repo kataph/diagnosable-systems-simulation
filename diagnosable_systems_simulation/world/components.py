@@ -242,6 +242,7 @@ class Switch(Component):
         enclosure_id: Optional[str] = None,
     ):
         self.is_closed = is_closed
+        self._nominal_is_closed = is_closed  # saved for nominal_parameters()
         self.ron = ron
         self.roff = roff
         super().__init__(
@@ -259,8 +260,8 @@ class Switch(Component):
         )
 
     def nominal_parameters(self) -> dict[str, Any]:
-        # Nominal state is closed (conducting): resistance = ron
-        return {"is_closed": True, "resistance": self.ron, "ron": self.ron, "roff": self.roff}
+        nom_r = self.ron if self._nominal_is_closed else self.roff
+        return {"is_closed": self._nominal_is_closed, "resistance": nom_r, "ron": self.ron, "roff": self.roff}
 
     def current_parameters(self) -> dict[str, Any]:
         params = super().current_parameters()
