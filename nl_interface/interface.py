@@ -219,7 +219,37 @@ def _instantiate(entry: dict):
     return cls(**params) if params else cls()
 
 
+def _expand_enclosure_targets(entries: list[dict], system) -> list[dict]:
+    """
+    If an action's subject is a PhysicalEnclosure, replace that single entry
+    with one entry per component contained inside the enclosure.  This turns
+    "observe the control module" into individual actions on each internal
+    component, which is what a technician physically does.
+
+    Entries with source/sink targets (test_path_continuity) are left unchanged.
+    """
+    from diagnosable_systems_simulation.world.components import PhysicalEnclosure
+
+    expanded: list[dict] = []
+    for entry in entries:
+        subject_id = entry.get("subject")
+        if subject_id and not entry.get("source"):
+            comp = system.component(subject_id)
+            if isinstance(comp, PhysicalEnclosure):
+                sub_entries = [
+                    {**entry, "subject": cid}
+                    for cid, c in system.all_components().items()
+                    if getattr(c, "enclosure_id", None) == subject_id
+                ]
+                if sub_entries:
+                    expanded.extend(sub_entries)
+                    continue
+        expanded.append(entry)
+    return expanded
+
+
 def _execute(entries: list[dict], system, allowed_actions: "set[str] | None" = None) -> list[tuple]:
+    entries = _expand_enclosure_targets(entries, system)
     results = []
     for entry in entries:
         action_id = entry.get("action_id", "?")
