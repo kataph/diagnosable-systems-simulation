@@ -241,7 +241,17 @@ def _expand_enclosure_targets(entries: list[dict], system) -> list[dict]:
     for entry in entries:
         subject_id = entry.get("subject")
         if subject_id and not entry.get("source"):
-            comp = system.component(subject_id)
+            # Removed components are no longer in the KG; skip expansion and
+            # let _execute handle them via the _removed_components dict.
+            removed = getattr(system, "_removed_components", {})
+            if subject_id in removed:
+                expanded.append(entry)
+                continue
+            try:
+                comp = system.component(subject_id)
+            except KeyError:
+                expanded.append(entry)
+                continue
             if isinstance(comp, PhysicalEnclosure):
                 sub_entries = [
                     {**entry, "subject": cid}
