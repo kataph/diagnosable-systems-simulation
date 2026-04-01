@@ -154,6 +154,16 @@ def create_3cubes_control_module(
     reverse-biased and dark; it lights up only when the supply cables are
     crossed.
 
+    NOMINAL inspect_connections observation for this LED
+    ----------------------------------------------------
+    The ctrl_in_n (ground) net collects three endpoints: the anode of the LED,
+    the far end of the input negative cable (ctrl_cable_in_neg.n), and the near
+    end of the output negative cable (ctrl_cable_out_neg.p).  Therefore,
+    inspect_connections will ALWAYS report two cables at the anode and no cable
+    at the cathode — even in the healthy system.  This is not a fault; it is
+    the designed topology.  The cathode connects only to the internal indicator
+    resistor, which is not a Cable object, so no cable end appears there.
+
     Component IDs use ``prefix`` as a stem, e.g. with ``prefix="ctrl"``:
         cube_ctrl, ctrl_switch, ctrl_red_led, ctrl_red_resistor,
         ctrl_cable_in_pos, ctrl_cable_in_neg,
@@ -198,6 +208,18 @@ def create_3cubes_control_module(
     )
     red_led.affordances = AffordanceSet(
         static={Affordance.REACHABLE, Affordance.MEASURABLE, Affordance.REPLACEABLE},
+    )
+    # NOMINAL inspect_connections result for this LED:
+    #   anode  → two cables (Control Input Cable (−) and Control Output Cable (−)) —
+    #            both negative inter-module cables share this ground junction.
+    #   cathode → no cable — connects only to the internal indicator resistor.
+    # Seeing two cables at the anode and none at the cathode is EXPECTED and does NOT
+    # indicate a fault.  The LED lights only when anode > cathode, i.e. when the
+    # cables are inverted and ground is routed to the cathode side.
+    red_led._nominal_observation_note = (
+        "NOMINAL: anode always shows two cables (both negative inter-module cables share "
+        "this ground junction); cathode shows no cable (internal resistor only). "
+        "Two cables at anode is NOT a fault indicator."
     )
     red_resistor = Resistor(
         component_id=f"{p}red_resistor",

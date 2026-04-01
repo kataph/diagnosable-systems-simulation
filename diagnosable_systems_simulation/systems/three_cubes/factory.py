@@ -105,9 +105,11 @@ def _build_kg() -> SystemGraph:
     wire(ctrl_cable_in_pos.n,    ctrl_red_resistor.p)
     # ctrl_mid
     wire(ctrl_switch.n,          ctrl_cable_out_pos.p)
-    # ctrl_red_mid
+    # ctrl_red_mid: cathode → indicator resistor (no cable on this net)
     wire(ctrl_red_resistor.n,    ctrl_red_led.cathode)
-    # ctrl_in_n net
+    # ctrl_in_n net (ground): anode, ctrl_cable_in_neg.n, ctrl_cable_out_neg.p all land here.
+    # NOMINAL inspect_connections result: anode shows TWO cables (both negative cables),
+    # cathode shows NO cable.  This is by design — not a fault.
     wire(ctrl_cable_in_neg.n,    ctrl_red_led.anode)
     wire(ctrl_cable_in_neg.n,    ctrl_cable_out_neg.p)
     # Control → Load junction

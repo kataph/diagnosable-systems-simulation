@@ -148,7 +148,9 @@ def _component_menu(system) -> str:
     for cid, c in system.kg.entities_of_type(EntityType.COMPONENT).items():
         enclosure_id = getattr(c, "enclosure_id", None)
         enclosure_note = f" [inside enclosure: {enclosure_id}]" if enclosure_id else ""
-        lines.append(f"- {cid}: {c.display_name}{enclosure_note}")
+        nominal_note = getattr(c, "_nominal_observation_note", None)
+        nominal_suffix = f" [NOTE: {nominal_note}]" if nominal_note else ""
+        lines.append(f"- {cid}: {c.display_name}{enclosure_note}{nominal_suffix}")
     return "\n".join(lines)
 
 
@@ -302,6 +304,15 @@ def _execute(entries: list[dict], system, allowed_actions: "set[str] | None" = N
                         _logger.info(f"auto-opened peephole {peephole.component_id!r} to satisfy OBSERVABLE for {subject_id!r}")
                         results.append((ph_action, ph_result))
                         result = system.apply_action(action, targets)
+                    else:
+                        # No peephole: invert the enclosure (REACHABLE implies OBSERVABLE).
+                        enclosure = system.component(enclosure_id)
+                        if enclosure is not None and not getattr(enclosure, "is_inverted", False):
+                            inv_action = InvertEnclosure()
+                            inv_result = system.apply_action(inv_action, {"subject": enclosure})
+                            _logger.info(f"auto-inverted {enclosure_id!r} to satisfy OBSERVABLE for {subject_id!r}")
+                            results.append((inv_action, inv_result))
+                            result = system.apply_action(action, targets)
         except Exception as exc:
             from diagnosable_systems_simulation.actions.base import ActionResult
             result = ActionResult(success=False, message=f"[{action_id}] error: {exc}")
@@ -326,10 +337,16 @@ def _verbalize(results: list[tuple], original_text: str, model: str = MODEL) -> 
 
     return _client().create(
         model=model,
-        system_prompt="""You are a summarization robot. Summarize diagnostic results in 1–3 plain sentences for a technician.
-        It is very important that you limit yourself to the summarization and do not express opinions about, say, likely causes of what you see.
-        Only summarize the information contained in the user prompt, do not add any other information/opinion/consideration/remark/etc.
-        Something terrible with happen if you do not limit yourself to a strict summarization taks.""",
+        system_prompt="""\
+You are a summarization robot. Summarize diagnostic results in 1–3 plain sentences for a technician.
+Limit yourself strictly to the information in the user prompt — do not add opinions, causes, or extra remarks.
+
+Critical rule — polarity inversions:
+If a (+)-labeled cable or port is connected to a (−)-labeled cable or port (or vice versa), you MUST
+explicitly state this as a POLARITY INVERSION and name the affected cables. Do not describe such a
+connection as "correct" or "nominal". Example: "POLARITY INVERSION DETECTED: PSU Output Cable (+)
+is connected to Control Input Cable (−), and PSU Output Cable (−) is connected to Control Input Cable (+)."
+""",
         user_prompt=raw,
         max_output_tokens=256,
     )

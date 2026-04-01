@@ -265,10 +265,15 @@ class Switch(Component):
 
     def current_parameters(self) -> dict[str, Any]:
         params = super().current_parameters()
-        # fault overlay can force is_closed; otherwise use live state
+        # fault overlay can force is_closed (visible state change, e.g. stuck switch);
+        # otherwise is_closed follows live user-controlled state.
         if "is_closed" not in self._fault_overlay:
             params["is_closed"] = self.is_closed
-        params["resistance"] = self.ron if params["is_closed"] else self.roff
+        # resistance: if the fault overlay sets it directly (e.g. internal open circuit
+        # modelled as roff regardless of mechanical position), use that value.
+        # Otherwise, derive from the logical is_closed state as normal.
+        if "resistance" not in self._fault_overlay:
+            params["resistance"] = self.ron if params["is_closed"] else self.roff
         params["ron"] = self.ron
         params["roff"] = self.roff
         return params

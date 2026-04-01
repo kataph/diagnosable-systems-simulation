@@ -301,8 +301,11 @@ class DiagnosableSystem:
         or restoring any snapshot.
 
         For each component ID:
-          - Cables: floating ports are reconnected to their original nodes
-            (from ``_orig_connections``).
+          - Cables: ports that are floating OR connected to the wrong node are
+            reconnected to their original nodes (from ``_orig_connections``).
+            This covers both "detached cable" faults (floating port) and
+            "crossed cable" faults (port connected but to the wrong net, e.g.
+            after a polarity-swap fault injection).
           - Components with a fault overlay: the overlay is cleared.
 
         Use this to persist confirmed repairs between partial hypothesis
@@ -319,7 +322,12 @@ class DiagnosableSystem:
             if isinstance(comp, Cable):
                 orig = getattr(comp, "_orig_connections", {})
                 for port_name, node_id in orig.items():
-                    if not comp.port(port_name).is_connected():
+                    port = comp.port(port_name)
+                    if not port.is_connected():
+                        self._graph.reconnect_port(cid, port_name, node_id)
+                    elif port.node_id != node_id:
+                        # Connected to wrong net (crossed-cable fault).
+                        self._graph.disconnect_port(cid, port_name)
                         self._graph.reconnect_port(cid, port_name, node_id)
             if comp._fault_overlay:
                 comp._fault_overlay.clear()
@@ -368,7 +376,12 @@ class DiagnosableSystem:
             if isinstance(comp, Cable):
                 orig = getattr(comp, "_orig_connections", {})
                 for port_name, node_id in orig.items():
-                    if not comp.port(port_name).is_connected():
+                    port = comp.port(port_name)
+                    if not port.is_connected():
+                        self._graph.reconnect_port(cid, port_name, node_id)
+                    elif port.node_id != node_id:
+                        # Connected to wrong net (crossed-cable fault).
+                        self._graph.disconnect_port(cid, port_name)
                         self._graph.reconnect_port(cid, port_name, node_id)
             if comp._fault_overlay:
                 comp._fault_overlay.clear()
