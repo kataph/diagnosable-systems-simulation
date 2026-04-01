@@ -112,6 +112,23 @@ class SystemGraph:
             KGEdge(from_id=from_id, to_id=to_id, relation=relation, attrs=attrs)
         )
 
+    def remove_entity(self, entity_id: str) -> None:
+        """
+        Remove an entity and all edges that reference it from the graph.
+
+        Does not touch the ``CircuitGraph`` — the caller is responsible for
+        removing the component from the electrical graph first (via
+        ``DiagnosableSystem.remove_component()`` or
+        ``CircuitGraph.remove_component()``).
+        """
+        if entity_id not in self._entities:
+            raise KeyError(f"Entity {entity_id!r} not found.")
+        del self._entities[entity_id]
+        self._edges = [
+            e for e in self._edges
+            if e.from_id != entity_id and e.to_id != entity_id
+        ]
+
     # ------------------------------------------------------------------
     # Queries
     # ------------------------------------------------------------------

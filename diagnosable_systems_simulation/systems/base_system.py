@@ -147,6 +147,22 @@ class DiagnosableSystem:
     def inject_fault(self, fault_action: Action, targets: dict[str, Component]) -> ActionResult:
         return self.apply_action(fault_action, targets)
 
+    def remove_component(self, component_id: str) -> None:
+        """
+        Physically remove a component from the system entirely.
+
+        Removes it from both the ``CircuitGraph`` (severs all port connections)
+        and the ``SystemGraph`` (removes entity + all KG edges).  The component
+        object is no longer reachable via ``all_components()`` or
+        ``component()`` after this call.
+
+        Use this to model physical removal (e.g. pulled-out LED) rather than
+        degradation.  After removal the socket is empty: the component does
+        not appear in observations, and the circuit is open at that location.
+        """
+        self._graph.remove_component(component_id)
+        self._kg.remove_entity(component_id)
+
     # ------------------------------------------------------------------
     # Entity access (components & modules via the knowledge graph)
     # ------------------------------------------------------------------
