@@ -151,11 +151,11 @@ def _component_menu(system) -> str:
         nominal_note = getattr(c, "_nominal_observation_note", None)
         nominal_suffix = f" [NOTE: {nominal_note}]" if nominal_note else ""
         lines.append(f"- {cid}: {c.display_name}{enclosure_note}{nominal_suffix}")
-    # Physically removed components are still listed so the parser LLM can map
-    # agent requests to them and receive a "not present" result rather than
-    # silently falling back to a neighbouring component.
+    # Physically removed components are still listed without any special label so
+    # the parser LLM maps to them normally. The execution layer intercepts the ID
+    # and returns a "not present" result, preventing fallback to wrong components.
     for cid, display_name in getattr(system, "_removed_components", {}).items():
-        lines.append(f"- {cid}: {display_name} [REMOVED — component is physically absent]")
+        lines.append(f"- {cid}: {display_name}")
     return "\n".join(lines)
 
 
@@ -177,7 +177,8 @@ Exception — test_path_continuity uses TWO component targets instead of "subjec
 Critical rules:
 - Map ONLY the core measurement or observation actions explicitly stated.
 - Do NOT infer or add context actions (e.g. switch operations, enclosure inversions, peephole openings) unless the description mentions them as context ("while the switch is closed", "with the enclosure open", etc.).
-- Do NOT add observe_component unless the instruction explicitly asks to visually inspect a component.\
+- Do NOT add observe_component unless the instruction explicitly asks to visually inspect a component.
+\
 """
 
 
@@ -192,6 +193,7 @@ def _parse(text: str, system, model: str = MODEL, allowed_actions: "set[str] | N
         f"System components:\n{_component_menu(system)}\n\n"
         f"Instruction: {text}"
     )
+    _logger.debug(f"_parse prompt:\n{prompt}")
     raw = _client().create(
         model=model,
         system_prompt=_PARSE_SYSTEM,
