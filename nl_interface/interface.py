@@ -151,6 +151,11 @@ def _component_menu(system) -> str:
         nominal_note = getattr(c, "_nominal_observation_note", None)
         nominal_suffix = f" [NOTE: {nominal_note}]" if nominal_note else ""
         lines.append(f"- {cid}: {c.display_name}{enclosure_note}{nominal_suffix}")
+    # Physically removed components are still listed so the parser LLM can map
+    # agent requests to them and receive a "not present" result rather than
+    # silently falling back to a neighbouring component.
+    for cid, display_name in getattr(system, "_removed_components", {}).items():
+        lines.append(f"- {cid}: {display_name} [REMOVED — component is physically absent]")
     return "\n".join(lines)
 
 
@@ -267,6 +272,22 @@ def _execute(entries: list[dict], system, allowed_actions: "set[str] | None" = N
         try:
             action = _instantiate(entry)
             subject_id = entry.get("subject")
+            # Short-circuit for physically removed components: return a clean
+            # "not present" result rather than letting the lookup raise KeyError
+            # and falling through to a neighbouring component.
+            removed = getattr(system, "_removed_components", {})
+            if subject_id and subject_id in removed:
+                display_name = removed[subject_id]
+                result = ActionResult(
+                    success=True,
+                    message=(
+                        f"'{display_name}' is not present — the component has "
+                        f"been physically removed from the system."
+                    ),
+                )
+                action = type("_stub", (), {"action_id": action_id, "cost": ActionCost(time=10.0)})()
+                results.append((action, result))
+                continue
             source_id  = entry.get("source")
             sink_id    = entry.get("sink")
             if source_id and sink_id:

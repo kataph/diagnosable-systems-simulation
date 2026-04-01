@@ -111,6 +111,10 @@ class DiagnosableSystem:
         self._last_result: Optional[SimulationResult] = None
         # Make the backend accessible to actions via context.extra
         self._context.extra.setdefault("backend", self._runner.backend)
+        # Tracks components that have been physically removed (id → display_name).
+        # Kept separate from the KG so the NL interface can still map to them
+        # and return a meaningful "not present" result.
+        self._removed_components: dict[str, str] = {}
 
     # ------------------------------------------------------------------
     # Simulation
@@ -156,10 +160,16 @@ class DiagnosableSystem:
         object is no longer reachable via ``all_components()`` or
         ``component()`` after this call.
 
+        The component's display_name is saved in ``_removed_components`` so
+        that the NL interface can still map agent requests to it and return
+        a meaningful "not present" result rather than silently falling through
+        to a nearby component.
+
         Use this to model physical removal (e.g. pulled-out LED) rather than
-        degradation.  After removal the socket is empty: the component does
-        not appear in observations, and the circuit is open at that location.
+        degradation.
         """
+        comp = self._kg.get_entity(component_id)  # fetch before deletion
+        self._removed_components[component_id] = comp.display_name
         self._graph.remove_component(component_id)
         self._kg.remove_entity(component_id)
 
