@@ -383,10 +383,16 @@ class DiagnosableSystem:
             excluded from the snapshot restore so they remain fixed during
             the test.
         """
-        from diagnosable_systems_simulation.world.components import Cable
+        from diagnosable_systems_simulation.world.components import Bulb, Cable
 
         fault_snapshot = getattr(self, "_fault_snapshot", None)
-        nominal_lit: "frozenset[str]" = getattr(self, "_nominal_emitting_light", frozenset())
+        # Only check main load Bulbs — indicator LEDs are accessories and may
+        # have been deliberately removed, so including them would permanently
+        # prevent test_repair from ever returning True.
+        nominal_lit: "frozenset[str]" = frozenset(
+            cid for cid in getattr(self, "_nominal_emitting_light", frozenset())
+            if isinstance(self._kg.get_entity(cid), Bulb)
+        )
         already = already_repaired_ids or set()
 
         # 1. Reset to fault state (preserving previously confirmed repairs)
