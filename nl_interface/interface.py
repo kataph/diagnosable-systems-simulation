@@ -285,12 +285,24 @@ def _expand_enclosure_targets(entries: list[dict], system) -> list[dict]:
 
 
 def _execute(entries: list[dict], system, allowed_actions: "set[str] | None" = None, _logger: logging.Logger | None = None) -> list[tuple]:
+    from diagnosable_systems_simulation.actions.base import ActionResult
+
     entries = _expand_enclosure_targets(entries, system)
     results = []
     for entry in entries:
         action_id = entry.get("action_id", "?")
+
+        # Unknown action ID (not in registry and not caught by allowed_actions check).
+        if action_id not in _REGISTRY:
+            result = ActionResult(
+                success=False,
+                message=f"Action '{action_id}' is not recognized or supported.",
+            )
+            action = type("_stub", (), {"action_id": action_id, "cost": ActionCost()})()
+            results.append((action, result))
+            continue
+
         if allowed_actions is not None and action_id not in allowed_actions:
-            from diagnosable_systems_simulation.actions.base import ActionResult
             result = ActionResult(
                 success=False,
                 message=f"[{action_id}] not permitted in current mode.",
@@ -319,52 +331,67 @@ def _execute(entries: list[dict], system, allowed_actions: "set[str] | None" = N
                 continue
             source_id  = entry.get("source")
             sink_id    = entry.get("sink")
-            if source_id and sink_id:
-                targets = {
-                    "source": system.component(source_id),
-                    "sink":   system.component(sink_id),
-                }
+            # Unknown component IDs: return a clear "not recognized" result.
+            for cid_key, cid_val in (("subject", subject_id), ("source", source_id), ("sink", sink_id)):
+                if cid_val and cid_val not in removed:
+                    try:
+                        system.component(cid_val)
+                    except KeyError:
+                        result = ActionResult(
+                            success=False,
+                            message=f"Component '{cid_val}' is not recognized — it is not present in this system.",
+                        )
+                        action = type("_stub", (), {"action_id": action_id, "cost": ActionCost()})()
+                        results.append((action, result))
+                        break
             else:
-                targets = {"subject": system.component(subject_id)} if subject_id else {}
-            result = system.apply_action(action, targets)
-            # If the action failed due to a missing affordance, auto-satisfy the
-            # physical prerequisite and retry once.
-            if not result.success and subject_id:
-                comp = targets.get("subject")
-                enclosure_id = getattr(comp, "enclosure_id", None)
-                if enclosure_id and "REACHABLE" in result.message:
-                    enclosure = system.component(enclosure_id)
-                    if enclosure is not None and not getattr(enclosure, "is_inverted", False):
-                        inv_action = InvertEnclosure()
-                        inv_result = system.apply_action(inv_action, {"subject": enclosure})
-                        _logger.info(f"auto-inverted {enclosure_id!r} to satisfy REACHABLE for {subject_id!r}")
-                        results.append((inv_action, inv_result))
-                        result = system.apply_action(action, targets)
-                elif enclosure_id and "OBSERVABLE" in result.message:
-                    from diagnosable_systems_simulation.world.components import Peephole
-                    peephole = next(
-                        (c for c in system.all_components().values()
-                         if isinstance(c, Peephole) and getattr(c, "enclosure_id", None) == enclosure_id
-                         and not c.is_open),
-                        None,
-                    )
-                    if peephole is not None:
-                        ph_action = OpenPeephole()
-                        ph_result = system.apply_action(ph_action, {"subject": peephole})
-                        _logger.info(f"auto-opened peephole {peephole.component_id!r} to satisfy OBSERVABLE for {subject_id!r}")
-                        results.append((ph_action, ph_result))
-                        result = system.apply_action(action, targets)
-                    else:
-                        # No peephole: invert the enclosure (REACHABLE implies OBSERVABLE).
+                if source_id and sink_id:
+                    targets = {
+                        "source": system.component(source_id),
+                        "sink":   system.component(sink_id),
+                    }
+                else:
+                    targets = {"subject": system.component(subject_id)} if subject_id else {}
+                result = system.apply_action(action, targets)
+                # If the action failed due to a missing affordance, auto-satisfy the
+                # physical prerequisite and retry once.
+                if not result.success and subject_id:
+                    comp = targets.get("subject")
+                    enclosure_id = getattr(comp, "enclosure_id", None)
+                    if enclosure_id and "REACHABLE" in result.message:
                         enclosure = system.component(enclosure_id)
                         if enclosure is not None and not getattr(enclosure, "is_inverted", False):
                             inv_action = InvertEnclosure()
                             inv_result = system.apply_action(inv_action, {"subject": enclosure})
-                            _logger.info(f"auto-inverted {enclosure_id!r} to satisfy OBSERVABLE for {subject_id!r}")
+                            _logger.info(f"auto-inverted {enclosure_id!r} to satisfy REACHABLE for {subject_id!r}")
                             results.append((inv_action, inv_result))
                             result = system.apply_action(action, targets)
+                    elif enclosure_id and "OBSERVABLE" in result.message:
+                        from diagnosable_systems_simulation.world.components import Peephole
+                        peephole = next(
+                            (c for c in system.all_components().values()
+                             if isinstance(c, Peephole) and getattr(c, "enclosure_id", None) == enclosure_id
+                             and not c.is_open),
+                            None,
+                        )
+                        if peephole is not None:
+                            ph_action = OpenPeephole()
+                            ph_result = system.apply_action(ph_action, {"subject": peephole})
+                            _logger.info(f"auto-opened peephole {peephole.component_id!r} to satisfy OBSERVABLE for {subject_id!r}")
+                            results.append((ph_action, ph_result))
+                            result = system.apply_action(action, targets)
+                        else:
+                            # No peephole: invert the enclosure (REACHABLE implies OBSERVABLE).
+                            enclosure = system.component(enclosure_id)
+                            if enclosure is not None and not getattr(enclosure, "is_inverted", False):
+                                inv_action = InvertEnclosure()
+                                inv_result = system.apply_action(inv_action, {"subject": enclosure})
+                                _logger.info(f"auto-inverted {enclosure_id!r} to satisfy OBSERVABLE for {subject_id!r}")
+                                results.append((inv_action, inv_result))
+                                result = system.apply_action(action, targets)
+                results.append((action, result))
+                continue
         except Exception as exc:
-            from diagnosable_systems_simulation.actions.base import ActionResult
             result = ActionResult(success=False, message=f"[{action_id}] error: {exc}")
             action = type("_stub", (), {"action_id": action_id, "cost": ActionCost()})()
         results.append((action, result))
