@@ -413,7 +413,7 @@ def _execute(entries: list[dict], system, allowed_actions: "set[str] | None" = N
 def _verbalize(results: list[tuple], original_text: str, model: str = MODEL) -> str:
     lines = []
     for action, result in results:
-        lines.append(f"action_id: {action.action_id}, success: {result.success}, message: {result.message}")
+        lines.append(f"action_id: {action.action_id}, action_description: {original_text}, success: {result.success}, message: {result.message}")
         if result.observation:
             for p in result.observation.properties:
                 unit = f" {p.unit}" if p.unit else ""
