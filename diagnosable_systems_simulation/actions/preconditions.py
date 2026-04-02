@@ -48,7 +48,7 @@ class ToolRequirement:
         context: WorldContext,
     ) -> tuple[bool, str]:
         if not context.has_tool(self.tool_name):
-            return False, f"Tool {self.tool_name!r} is not in hand."
+            return False, f"Tool {self.tool_name!r} is not in hand. Please note that it is impossible to get this tool."
         return True, ""
 
 

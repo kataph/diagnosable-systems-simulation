@@ -389,9 +389,15 @@ class DiagnosableSystem:
         # Only check main load Bulbs — indicator LEDs are accessories and may
         # have been deliberately removed, so including them would permanently
         # prevent test_repair from ever returning True.
+        def _is_bulb(cid: str) -> bool:
+            try:
+                return isinstance(self._kg.get_entity(cid), Bulb)
+            except KeyError:
+                return False  # component was physically removed
+
         nominal_lit: "frozenset[str]" = frozenset(
             cid for cid in getattr(self, "_nominal_emitting_light", frozenset())
-            if isinstance(self._kg.get_entity(cid), Bulb)
+            if _is_bulb(cid)
         )
         already = already_repaired_ids or set()
 
