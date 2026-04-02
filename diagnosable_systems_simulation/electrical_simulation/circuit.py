@@ -149,18 +149,19 @@ class CircuitGraph:
         del self._edges[component_id]
         return edge
 
-    def short_nodes(self, node_a: str, node_b: str, short_id: str) -> None:
+    def short_nodes(self, node_a: str, node_b: str, short_id: str, resistance: float = 1e-6) -> None:
         """
-        Insert a near-zero-resistance wire between two nodes.
-        Represented as a very small resistor in the netlist so the
-        backend does not need to merge nodes.
+        Insert a resistor between two nodes.
+
+        The default resistance (1 µΩ) acts as a near-zero wire.  Pass a
+        higher value to model a deliberate bridging probe (e.g. 0.01 Ω).
         """
         from diagnosable_systems_simulation.world.components import Resistor
 
         r = Resistor(
             component_id=short_id,
             display_name=f"Short({node_a}↔{node_b})",
-            resistance=1e-6,
+            resistance=resistance,
         )
         self.add_component(r, {"p": node_a, "n": node_b})
 

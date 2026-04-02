@@ -885,3 +885,213 @@ class VerifyRepair(Action):
         comp = targets.get("subject")
         name = comp.display_name if comp is not None else "unknown"
         return ActionResult(message=f"Marked '{name}' as hypothesis-verification target.")
+
+
+class MoveLED(Action):
+    """
+    Move a LED from its current module to another module's LED slot.
+
+    If the target module already has a LED, the two LEDs are swapped
+    (circuit connections exchanged; resistors stay in place).
+    If the target module has no LED (and no resistor), both the LED and its
+    series resistor are relocated to the target module's LED slot.
+
+    Slot anchors (``_led_slot_pos`` / ``_led_slot_neg``) must be set on each
+    module's PhysicalEnclosure by the factory at build time.
+
+    targets: {"subject": <LED component>}
+    params:  target_module_id — component_id of the target PhysicalEnclosure
+    """
+
+    action_id = "move_led"
+    description = (
+        "Move a LED from its current module to another module LED slot. "
+        "If the target slot already has a LED the two are swapped; "
+        "if the target slot is empty the LED and its series resistor are moved."
+    )
+    cost = ActionCost(time=60.0)
+    mutates_graph = True
+
+    def __init__(self, target_module_id: str = ""):
+        self.target_module_id = target_module_id
+
+    def check_preconditions(self, targets, context):
+        ok, failures = PreconditionChecker.check_all(
+            [AffordanceRequirement("subject", Affordance.REPLACEABLE)],
+            targets, context,
+        )
+        return ok, "; ".join(failures)
+
+    def execute(self, targets, graph, context, last_result):
+        from diagnosable_systems_simulation.world.components import LED, PhysicalEnclosure
+
+        src_led: LED = targets["subject"]
+        system = context.extra.get("_system")
+        if system is None:
+            return ActionResult(success=False, message="System not available in context.")
+
+        if not self.target_module_id:
+            return ActionResult(success=False, message="target_module_id parameter is required.")
+
+        try:
+            tgt_cube = system.component(self.target_module_id)
+        except KeyError:
+            return ActionResult(success=False, message=f"Target module '{self.target_module_id}' not found.")
+
+        if not isinstance(tgt_cube, PhysicalEnclosure):
+            return ActionResult(success=False, message=f"'{self.target_module_id}' is not a PhysicalEnclosure.")
+
+        src_cube_id = getattr(src_led, "enclosure_id", None)
+        if not src_cube_id:
+            return ActionResult(success=False, message="Source LED has no enclosure_id.")
+        src_cube = system.component(src_cube_id)
+
+        if src_cube_id == self.target_module_id:
+            return ActionResult(success=False, message="Source and target modules are the same.")
+
+        src_slot_pos = getattr(src_cube, "_led_slot_pos", None)
+        src_slot_neg = getattr(src_cube, "_led_slot_neg", None)
+        tgt_slot_pos = getattr(tgt_cube, "_led_slot_pos", None)
+        tgt_slot_neg = getattr(tgt_cube, "_led_slot_neg", None)
+
+        if not all([src_slot_pos, src_slot_neg, tgt_slot_pos, tgt_slot_neg]):
+            return ActionResult(
+                success=False,
+                message="LED slot anchors not defined for one or both modules.",
+            )
+
+        tgt_neg_node = tgt_slot_neg[0].port(tgt_slot_neg[1]).node_id
+
+        # Check if target module has a LED
+        tgt_parts = system.parts_of_module(self.target_module_id)
+        tgt_led = next((c for c in tgt_parts if isinstance(c, LED)), None)
+
+        if tgt_led is not None:
+            # Swap the two LEDs only; resistors remain in their original slots.
+            src_neg_node = src_slot_neg[0].port(src_slot_neg[1]).node_id
+            src_mid_node = src_led.port("anode").node_id
+            tgt_mid_node = tgt_led.port("anode").node_id
+
+            graph.disconnect_port(src_led.component_id, "anode")
+            graph.disconnect_port(src_led.component_id, "cathode")
+            graph.disconnect_port(tgt_led.component_id, "anode")
+            graph.disconnect_port(tgt_led.component_id, "cathode")
+
+            graph.reconnect_port(src_led.component_id, "anode",   tgt_mid_node)
+            graph.reconnect_port(src_led.component_id, "cathode", tgt_neg_node)
+            graph.reconnect_port(tgt_led.component_id, "anode",   src_mid_node)
+            graph.reconnect_port(tgt_led.component_id, "cathode", src_neg_node)
+
+            src_led.enclosure_id = self.target_module_id
+            tgt_led.enclosure_id = src_cube_id
+
+            return ActionResult(
+                message=(
+                    f"Swapped '{src_led.display_name}' and '{tgt_led.display_name}' "
+                    f"between {src_cube.display_name!r} and {tgt_cube.display_name!r}."
+                )
+            )
+        else:
+            # No LED (and no resistor) in the target slot: move LED + resistor.
+            src_resistor_id = getattr(src_led, "_series_resistor_id", None)
+            if not src_resistor_id:
+                return ActionResult(success=False, message="Source LED has no _series_resistor_id.")
+            src_resistor = system.component(src_resistor_id)
+
+            tgt_pos_node = tgt_slot_pos[0].port(tgt_slot_pos[1]).node_id
+
+            graph.disconnect_port(src_resistor_id, "p")
+            graph.reconnect_port(src_resistor_id, "p", tgt_pos_node)
+
+            graph.disconnect_port(src_led.component_id, "cathode")
+            graph.reconnect_port(src_led.component_id, "cathode", tgt_neg_node)
+
+            src_led.enclosure_id = self.target_module_id
+            src_resistor.enclosure_id = self.target_module_id
+
+            return ActionResult(
+                message=(
+                    f"Moved '{src_led.display_name}' (and its resistor) "
+                    f"from {src_cube.display_name!r} to {tgt_cube.display_name!r}."
+                )
+            )
+
+
+class ShortPorts(Action):
+    """
+    Bridge two component ports with a 0.01 Ω probe connection.
+
+    Physically models shorting two circuit terminals together with a wire or
+    probe.  Inserts a 0.01 Ω resistor between the two circuit nodes in the
+    graph (``mutates_graph = True``).
+
+    Port selection follows the same auto-pick logic as TestPathContinuity:
+    the preferred port is used if given, otherwise the first connected port.
+
+    Requires REACHABLE + MEASURABLE on both source and sink.
+
+    targets: {"source": <Component>, "sink": <Component>}
+    params:  source_port — port name on source component (optional)
+             target_port — port name on sink component (optional)
+    """
+
+    action_id = "short_ports"
+    description = (
+        "Bridge two component ports with a 0.01 Ω connection "
+        "(models probing / wiring two circuit nodes together)."
+    )
+    cost = ActionCost(time=20.0)
+    mutates_graph = True
+
+    def __init__(self, source_port: str = "", target_port: str = ""):
+        self.source_port = source_port
+        self.target_port = target_port
+
+    def check_preconditions(self, targets, context):
+        ok, failures = PreconditionChecker.check_all(
+            [
+                AffordanceRequirement("source", Affordance.REACHABLE),
+                AffordanceRequirement("source", Affordance.MEASURABLE),
+                AffordanceRequirement("sink",   Affordance.REACHABLE),
+                AffordanceRequirement("sink",   Affordance.MEASURABLE),
+            ],
+            targets, context,
+        )
+        return ok, "; ".join(failures)
+
+    def execute(self, targets, graph, context, last_result):
+        source = targets["source"]
+        sink   = targets["sink"]
+
+        node_a = TestPathContinuity._pick_node(source, self.source_port)
+        node_b = TestPathContinuity._pick_node(sink,   self.target_port)
+
+        if node_a is None or node_b is None:
+            return ActionResult(
+                success=False,
+                message="Cannot short: one or both port nodes are unresolvable (floating port?).",
+            )
+
+        if node_a == node_b:
+            return ActionResult(
+                message="Ports are already on the same circuit node — no short added.",
+            )
+
+        short_id = f"_short_{source.component_id}_{sink.component_id}"
+        try:
+            graph.short_nodes(node_a, node_b, short_id, resistance=0.01)
+        except ValueError:
+            return ActionResult(
+                success=False,
+                message="A short between these nodes already exists.",
+            )
+
+        src_port_label = self.source_port or "auto"
+        tgt_port_label = self.target_port or "auto"
+        return ActionResult(
+            message=(
+                f"Shorted '{source.display_name}' (port {src_port_label}) "
+                f"↔ '{sink.display_name}' (port {tgt_port_label}) "
+                f"with 0.01 Ω bridge (nodes {node_a} ↔ {node_b})."
+            )
+        )

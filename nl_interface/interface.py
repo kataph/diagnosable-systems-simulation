@@ -32,9 +32,9 @@ import anthropic, openai
 from diagnosable_systems_simulation.actions.base import ActionCost
 from diagnosable_systems_simulation.actions.diagnostic_actions import (
     AdjustPotentiometer, ClosePeephole, InspectConnections, InvertEnclosure,
-    MeasureCurrent, MeasureVoltage, ObserveComponent, OpenPeephole, ReplaceComponent,
-    CloseSwitch, OpenSwitch, RestoreEnclosure, TestContinuity, TestDiode,
-    TestPathContinuity, VerifyRepair,
+    MeasureCurrent, MeasureVoltage, MoveLED, ObserveComponent, OpenPeephole,
+    ReplaceComponent, CloseSwitch, OpenSwitch, RestoreEnclosure, ShortPorts,
+    TestContinuity, TestDiode, TestPathContinuity, VerifyRepair,
 )
 from diagnosable_systems_simulation.actions.fault_actions import (
     DegradeComponent, DisconnectCable, ForceSwitch, ReconnectCable,
@@ -88,6 +88,13 @@ _REGISTRY: dict[str, tuple] = {
         "is_closed": "bool — true = permanently closed, false = permanently open",
     }),
     "verify_repair":       (VerifyRepair,       {}),
+    "move_led":            (MoveLED,            {
+        "target_module_id": "str — component_id of the target PhysicalEnclosure (e.g. 'cube_psu' or 'cube_ctrl3')",
+    }),
+    "short_ports":         (ShortPorts,         {
+        "source_port": "str — port name on source component to bridge (optional)",
+        "target_port": "str — port name on sink component to bridge (optional)",
+    }),
 }
 
 # ---------------------------------------------------------------------------
@@ -170,8 +177,9 @@ If an action has no listed parameters, omit "params" entirely — do NOT include
 Never add keys to "params" that are not listed in the action's parameter description.
 Return ONLY the JSON array — no markdown fences, no commentary.
 
-Exception — test_path_continuity uses TWO component targets instead of "subject":
+Exception — test_path_continuity and short_ports use TWO component targets instead of "subject":
   {"action_id": "test_path_continuity", "source": "<component_id>", "sink": "<component_id>", "params": {<optional port kwargs>}}
+  {"action_id": "short_ports", "source": "<component_id>", "sink": "<component_id>", "params": {<optional port kwargs>}}
 
 Critical rules:
 - Map ONLY the core measurement or observation actions explicitly stated.

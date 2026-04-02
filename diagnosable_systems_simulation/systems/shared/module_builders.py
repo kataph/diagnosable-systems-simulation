@@ -125,6 +125,14 @@ def create_psu_module(x_left: float = 0.0) -> SimpleNamespace:
         position=Position(x + 0.10, 0.05, 0.03),
     )
 
+    # LED-slot metadata used by MoveLED action.
+    # The slot anchors are the components/ports the resistor.p and LED.cathode
+    # connect to in this module.  They stay in the circuit even when the LED
+    # and resistor are removed, so MoveLED can find the correct node IDs.
+    green_led._series_resistor_id = green_resistor.component_id
+    cube._led_slot_pos = (source, "pos")   # resistor.p connects here
+    cube._led_slot_neg = (source, "neg")   # LED.cathode connects here (GND)
+
     all_comps = [cube, source, green_led, green_resistor, cable_pos, cable_neg]
     ns = SimpleNamespace(
         cube=cube, source=source, green_led=green_led,
@@ -341,6 +349,13 @@ def create_10cubes_control_module(
     cable_in_neg  = Cable(f"{p}cable_in_neg",  f"Control Input Cable (−){lbl}",  position=Position(x,        0.05, 0.03))
     cable_out_pos = Cable(f"{p}cable_out_pos", f"Control Output Cable (+){lbl}", position=Position(x + 0.10, 0.05, 0.07))
     cable_out_neg = Cable(f"{p}cable_out_neg", f"Control Output Cable (−){lbl}", position=Position(x + 0.10, 0.05, 0.03))
+
+    # LED-slot metadata used by MoveLED action.
+    # switch.n is the positive anchor (where resistor.p connects);
+    # cable_in_neg.n is the negative/GND anchor (where led.cathode connects).
+    green_led._series_resistor_id = green_resistor.component_id
+    cube._led_slot_pos = (switch, "n")           # resistor.p connects here
+    cube._led_slot_neg = (cable_in_neg, "n")     # LED.cathode connects here (GND)
 
     all_comps = [cube, switch, green_led, green_resistor,
                  cable_in_pos, cable_in_neg, cable_out_pos, cable_out_neg]

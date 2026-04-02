@@ -142,6 +142,7 @@ class DiagnosableSystem:
             return ActionResult(success=False, message=reason)
         if self._last_result is None:
             self.simulate()
+        self._context.extra["_system"] = self  # actions may call system.component()
         result = action.execute(targets, self._graph, self._context, self._last_result)
         if action.mutates_graph:
             self._last_result = self._runner.run(self._graph, self._context)
