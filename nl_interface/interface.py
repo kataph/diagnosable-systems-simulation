@@ -171,6 +171,7 @@ def _component_menu(system) -> str:
 
 _PARSE_SYSTEM = """\
 You map a technician's instruction to a JSON list of actions on a physical system.
+
 Each action must be:
   {"action_id": "<id>", "subject": "<component_id>", "params": {<constructor kwargs>}}
 If an action has no listed parameters, omit "params" entirely — do NOT include it at all.
@@ -185,6 +186,22 @@ Critical rules:
 - Map ONLY the core measurement or observation actions explicitly stated.
 - Do NOT infer or add context actions (e.g. switch operations, enclosure inversions, peephole openings) unless the description mentions them as context ("while the switch is closed", "with the enclosure open", etc.).
 - Do NOT add observe_component unless the instruction explicitly asks to visually inspect a component.
+- Every action except test_path_continuity and short_ports MUST include exactly one "subject".
+- Under no circumstances may an action be emitted without a "subject" (except the two multi-target exceptions above).
+
+Plural / multi-component instructions:
+- If the instruction refers to multiple components (e.g., "all cables", "every wire", "all LEDs", "look at all the cables", "measure voltages everywhere"), you must output one action per component matching that noun category.
+- Each of those actions must include its own "subject" (or "source"/"sink" for continuity actions).
+- Never emit a “global” action that lacks the required component fields.
+
+Component-matching for plural phrases:
+- When a noun class is used ("cables", "LEDs", "switches"), map it to all system components whose identifiers contain that class name (case-insensitive substring match).
+- If an instruction is ambiguous but clearly refers to a category (e.g., “check all connections”), infer the category and list all components of that type.
+- If no component matches the noun, return an empty JSON list.
+
+Return format:
+- Always return a JSON array.
+- No surrounding text, no explanation, no markdown code fences.
 \
 """
 
