@@ -882,8 +882,11 @@ class VerifyRepair(Action):
         return True, ""
 
     def execute(self, targets, graph, context, last_result):
+        from diagnosable_systems_simulation.world.components import Cable
         comp = targets.get("subject")
         name = comp.display_name if comp is not None else "unknown"
+        if isinstance(comp, Cable):
+            self.cost = ActionCost(time=30.0)
         return ActionResult(message=f"Marked '{name}' as hypothesis-verification target.")
 
 

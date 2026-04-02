@@ -408,7 +408,7 @@ def create_load_module(x_left: float = 0.30) -> SimpleNamespace:
 
     main_bulb = Bulb(
         component_id="main_bulb",
-        display_name="Main Lightbulb",
+        display_name="Main Load (lamp)",
         resistance=120.0,
         power_threshold=0.05,
         position=Position(x + 0.05, 0.05, 0.10),
