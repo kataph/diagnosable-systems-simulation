@@ -444,6 +444,16 @@ def run(text: str, system: DiagnosableSystem, model: str = MODEL, allowed_action
         fault-injection actions during ordinary diagnosis.
     """
     entries = _parse(text, system, model, allowed_actions, _logger)
+
+    if not entries:
+        narrative = (
+            "The requested action could not be mapped to any recognized "
+            "diagnostic operation. Only actions from the available action "
+            "list are supported (e.g. measure_voltage, test_continuity, "
+            "inspect_connections, verify_repair, …)."
+        )
+        return narrative, ActionCost(), entries, []
+
     results = _execute(entries, system, allowed_actions, _logger)
 
     resources: dict[str, float] = {}
@@ -455,5 +465,5 @@ def run(text: str, system: DiagnosableSystem, model: str = MODEL, allowed_action
         equipment=list({e for a, _ in results for e in a.cost.equipment}),
         resources_consumed=resources,
     )
-        
+
     return _verbalize(results=results, original_text=text, model=model), total, entries, results
