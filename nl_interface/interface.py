@@ -231,9 +231,18 @@ def _instantiate(entry: dict):
 def _expand_enclosure_targets(entries: list[dict], system) -> list[dict]:
     """
     If an action's subject is a PhysicalEnclosure, replace that single entry
-    with one entry per component contained inside the enclosure.  This turns
-    "observe the control module" into individual actions on each internal
-    component, which is what a technician physically does.
+    with one entry per relevant sub-component.
+
+    - For ``verify_repair``: expands to all PART_OF children of the module
+      (switch, cables, …).  This models "replace the whole module", which
+      physically restores every part inside — including cables that are
+      not physically enclosed but belong to the module.
+      Removed components are excluded from the expansion (they have no fault
+      to repair).
+
+    - For all other actions: expands to CONTAINED_IN components only (the
+      components physically inside the enclosure box), which is what a
+      technician accesses when they open the enclosure.
 
     Entries with source/sink targets (test_path_continuity) are left unchanged.
     """
@@ -255,11 +264,20 @@ def _expand_enclosure_targets(entries: list[dict], system) -> list[dict]:
                 expanded.append(entry)
                 continue
             if isinstance(comp, PhysicalEnclosure):
-                sub_entries = [
-                    {**entry, "subject": cid}
-                    for cid, c in system.all_components().items()
-                    if getattr(c, "enclosure_id", None) == subject_id
-                ]
+                if entry.get("action_id") == "verify_repair":
+                    # Expand to all PART_OF members, skipping removed ones.
+                    sub_entries = [
+                        {**entry, "subject": part.component_id}
+                        for part in system.parts_of_module(subject_id)
+                        if part.component_id not in removed
+                    ]
+                else:
+                    # Expand to components physically inside the enclosure.
+                    sub_entries = [
+                        {**entry, "subject": cid}
+                        for cid, c in system.all_components().items()
+                        if getattr(c, "enclosure_id", None) == subject_id
+                    ]
                 if sub_entries:
                     expanded.extend(sub_entries)
                     continue
