@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from logging import Logger
 from typing import Optional
 
 from diagnosable_systems_simulation.actions.base import Action, ActionResult
