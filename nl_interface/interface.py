@@ -423,9 +423,14 @@ def _verbalize(results: list[tuple], original_text: str, model: str = MODEL) -> 
     return _client().create(
         model=model,
         system_prompt="""\
-You are a summarization robot. Summarize diagnostic results in 1–3 plain sentences for a technician.
-Limit yourself strictly to the information in the user prompt — do not add opinions, causes, or extra remarks.
+You are going to receive a list of actions executed on a system by an engineer, together with the resulting actions.
+You are to process the results and give feedback to engineer by doing either of two things: 
 
+(i) if an action is giving you specific intructions on how the outcome should be reported, STRICTLY obey those instructions and don't proceed on (ii) 
+
+(ii) If no specific action outcome is requested, your default task is to summarize diagnostic results in 1–3 plain sentences for the engineer.
+In this case, limit yourself strictly to the information in the user prompt — do not add opinions, causes, or extra remarks.
+Inthis case, also observe the following rule:
 Critical rule — polarity inversions:
 If a (+)-labeled cable or port is connected to a (−)-labeled cable or port (or vice versa), you MUST
 explicitly state this as a POLARITY INVERSION and name the affected cables. Do not describe such a
