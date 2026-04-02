@@ -410,14 +410,21 @@ def _execute(entries: list[dict], system, allowed_actions: "set[str] | None" = N
 # Step 3: verbalize
 # ---------------------------------------------------------------------------
 
-def _verbalize(results: list[tuple], original_text: str, model: str = MODEL) -> str:
+def _verbalize(results: list[tuple], original_text: str, model: str = MODEL, reporting_requirements: "str | None" = None) -> str:
+    full_description = original_text
+    if reporting_requirements:
+        full_description = original_text + "\n\n" + reporting_requirements
     lines = []
     for action, result in results:
-        lines.append(f"action_id: {action.action_id}, action_description: {original_text}, success: {result.success}, message: {result.message}")
+        lines.append(f"action_id: {action.action_id}, action_description: {full_description}, success: {result.success}, message: {result.message}")
         if result.observation:
             for p in result.observation.properties:
                 unit = f" {p.unit}" if p.unit else ""
                 lines.append(f"  {p.name}: {p.value}{unit}")
+    if not lines:
+        # No executed actions — include the description so the LLM can still
+        # honour any reporting requirements (e.g. return a verdict token).
+        lines.append(f"action_description: {full_description}, no actions were executed.")
     raw = "\n".join(lines)
 
     return _client().create(
@@ -446,7 +453,7 @@ is connected to Control Input Cable (−), and PSU Output Cable (−) is connect
 # Public API
 # ---------------------------------------------------------------------------
 
-def run(text: str, system: DiagnosableSystem, model: str = MODEL, allowed_actions: "set[str] | None" = None, _logger: logging.Logger | None = None) -> tuple[str, ActionCost, list[dict], list[tuple]]:
+def run(text: str, system: DiagnosableSystem, model: str = MODEL, allowed_actions: "set[str] | None" = None, _logger: logging.Logger | None = None, reporting_requirements: "str | None" = None) -> tuple[str, ActionCost, list[dict], list[tuple]]:
     """
     Parse *text*, execute the implied actions on *system*, and return a
     plain-language summary together with the total action cost.
@@ -459,12 +466,23 @@ def run(text: str, system: DiagnosableSystem, model: str = MODEL, allowed_action
     entries = _parse(text, system, model, allowed_actions, _logger)
 
     if not entries:
-        narrative = (
+        base = (
             "The requested action could not be mapped to any recognized "
             "diagnostic operation. Only actions from the available action "
             "list are supported (e.g. measure_voltage, test_continuity, "
             "inspect_connections, verify_repair, …)."
         )
+        # If there are reporting requirements (e.g. ANOMALOUS/NOMINAL verdict),
+        # honour them so that callers depending on the verdict token do not fail.
+        if reporting_requirements:
+            narrative = _verbalize(
+                results=[],
+                original_text=base,
+                model=model,
+                reporting_requirements=reporting_requirements,
+            )
+        else:
+            narrative = base
         return narrative, ActionCost(), entries, []
 
     results = _execute(entries, system, allowed_actions, _logger)
@@ -479,4 +497,4 @@ def run(text: str, system: DiagnosableSystem, model: str = MODEL, allowed_action
         resources_consumed=resources,
     )
 
-    return _verbalize(results=results, original_text=text, model=model), total, entries, results
+    return _verbalize(results=results, original_text=text, model=model, reporting_requirements=reporting_requirements), total, entries, results
