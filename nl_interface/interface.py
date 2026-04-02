@@ -26,7 +26,6 @@ import json
 import logging
 from typing import Literal
 
-_logger = logging.getLogger("nl_interface")
 
 import anthropic, openai
 
@@ -182,7 +181,7 @@ Critical rules:
 """
 
 
-def _parse(text: str, system, model: str = MODEL, allowed_actions: "set[str] | None" = None) -> list[dict]:
+def _parse(text: str, system, model: str = MODEL, allowed_actions: "set[str] | None" = None, _logger: logging.Logger | None = None) -> list[dict]:
     registry = (
         {k: v for k, v in _REGISTRY.items() if k in allowed_actions}
         if allowed_actions is not None
@@ -285,7 +284,7 @@ def _expand_enclosure_targets(entries: list[dict], system) -> list[dict]:
     return expanded
 
 
-def _execute(entries: list[dict], system, allowed_actions: "set[str] | None" = None) -> list[tuple]:
+def _execute(entries: list[dict], system, allowed_actions: "set[str] | None" = None, _logger: logging.Logger | None = None) -> list[tuple]:
     entries = _expand_enclosure_targets(entries, system)
     results = []
     for entry in entries:
@@ -407,7 +406,7 @@ is connected to Control Input Cable (−), and PSU Output Cable (−) is connect
 # Public API
 # ---------------------------------------------------------------------------
 
-def run(text: str, system: DiagnosableSystem, model: str = MODEL, allowed_actions: "set[str] | None" = None) -> tuple[str, ActionCost, list[dict], list[tuple]]:
+def run(text: str, system: DiagnosableSystem, model: str = MODEL, allowed_actions: "set[str] | None" = None, _logger: logging.Logger | None = None) -> tuple[str, ActionCost, list[dict], list[tuple]]:
     """
     Parse *text*, execute the implied actions on *system*, and return a
     plain-language summary together with the total action cost.
@@ -417,8 +416,8 @@ def run(text: str, system: DiagnosableSystem, model: str = MODEL, allowed_action
         action IDs.  Use this to prevent the NL agent from attempting repair or
         fault-injection actions during ordinary diagnosis.
     """
-    entries = _parse(text, system, model, allowed_actions)
-    results = _execute(entries, system, allowed_actions)
+    entries = _parse(text, system, model, allowed_actions, _logger)
+    results = _execute(entries, system, allowed_actions, _logger)
 
     resources: dict[str, float] = {}
     for a, _ in results:
