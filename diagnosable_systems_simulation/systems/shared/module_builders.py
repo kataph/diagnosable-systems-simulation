@@ -440,6 +440,11 @@ def create_load_module(x_left: float = 0.30) -> SimpleNamespace:
         position=Position(x + 0.05, 0.05, 0.05),
         enclosure_id="cube_load",
     )
+    internal_bulb._nominal_observation_note = (
+        "DIAGNOSTIC: This lamp is wired in parallel with the main load. "
+        "It lights when the main load carries no current (open-circuit fault). "
+        "A lit lamp indicates a main load failure — treat as ANOMALOUS, not NOMINAL."
+    )
     internal_bulb.affordances = AffordanceSet(
         conditional=[
             ConditionalAffordance(

@@ -98,6 +98,9 @@ def observe_component(
     if Affordance.OBSERVABLE in active:
         record.add("display_name", component.display_name)
         record.add("type", type(component).__name__)
+        note = getattr(component, "_nominal_observation_note", None)
+        if note:
+            record.add("diagnostic_note", note)
         # Only internal faults that produce a visible external sign are captured
         # here.  Interface faults (e.g. a disconnected cable end) and
         # non-observable internal faults (e.g. a fractured conductor hidden
