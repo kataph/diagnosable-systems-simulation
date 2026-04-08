@@ -1126,7 +1126,7 @@ class ShortPorts(Action):
         )
 
 
-class TestControlSubchain(Action):
+class DetachSequenceOfControlModulesAndAttachItToPowerAndLoad(Action):
     """
     Isolate a contiguous subsequence of control modules (from *start_module_id*
     to *end_module_id* inclusive) and temporarily wire it directly between the
@@ -1143,22 +1143,23 @@ class TestControlSubchain(Action):
     saved via ``system.snapshot()`` before any wiring change and restored
     unconditionally afterwards — no manual port-by-port bookkeeping.
 
-    Constructor parameters
-    ----------------------
-    start_module_id : str
-        component_id of the first PhysicalEnclosure in the subsequence
-        (e.g. ``"cube_ctrl3"``).
-    end_module_id : str
-        component_id of the last PhysicalEnclosure in the subsequence
-        (e.g. ``"cube_ctrl6"``).
-
-    targets: {}   (modules are identified by constructor params, not KG targets)
+    Constructor parameters / targets
+    ---------------------------------
+    start_module_id : str  (constructor param)
+        component_id of the first PhysicalEnclosure in the subsequence.
+        When called via the NL interface the first module is supplied as the
+        ``source`` target; ``start_module_id`` may then be left empty.
+    end_module_id : str  (constructor param)
+        component_id of the last PhysicalEnclosure in the subsequence.
+        When called via the NL interface the last module is supplied as the
+        ``sink`` target; ``end_module_id`` may then be left empty.
     """
 
-    action_id = "test_control_subchain"
+    action_id = "detach_sequence_of_control_modules_and_attach_it_to_power_and_load"
     description = (
-        "Detach a contiguous sequence of control modules from the circuit and "
-        "connect them directly between PSU and load to test if the load lights up."
+        "Detach a contiguous sequence of control modules (source = first module, "
+        "sink = last module) from the circuit and connect them directly between "
+        "PSU and load to test if the load lights up."
     )
     # Base cost covers the simulation run; cable disconnect/reconnect costs are
     # accumulated from sub-actions below.
@@ -1169,7 +1170,9 @@ class TestControlSubchain(Action):
         self.end_module_id = end_module_id
 
     def check_preconditions(self, targets, context):
-        if not self.start_module_id or not self.end_module_id:
+        start = self.start_module_id or getattr(targets.get("source"), "component_id", "")
+        end   = self.end_module_id   or getattr(targets.get("sink"),   "component_id", "")
+        if not start or not end:
             return False, "start_module_id and end_module_id are required."
         return True, ""
 
@@ -1183,11 +1186,20 @@ class TestControlSubchain(Action):
         if system is None:
             return ActionResult(success=False, message="System not available in context.")
 
+        # Accept module IDs either from constructor params or from source/sink targets
+        # (the NL interface supplies them as targets; tests supply them as constructor params).
+        start_module_id = (
+            self.start_module_id or getattr(targets.get("source"), "component_id", "")
+        )
+        end_module_id = (
+            self.end_module_id or getattr(targets.get("sink"), "component_id", "")
+        )
+
         def _prefix(cube_id: str) -> str:
             return cube_id.removeprefix("cube_")
 
-        start_pfx = _prefix(self.start_module_id)
-        end_pfx   = _prefix(self.end_module_id)
+        start_pfx = _prefix(start_module_id)
+        end_pfx   = _prefix(end_module_id)
 
         try:
             # Left boundary: input cables of the first module in the subchain
@@ -1279,15 +1291,19 @@ class TestControlSubchain(Action):
             component_id=f"subchain_{start_pfx}_to_{end_pfx}",
             action_id=self.action_id,
         )
-        record.add("start_module", self.start_module_id)
-        record.add("end_module", self.end_module_id)
+        record.add("start_module", start_module_id)
+        record.add("end_module", end_module_id)
         record.add("lamp_on", lamp_on)
 
         status = "ON" if lamp_on else "OFF"
         return ActionResult(
             observation=record,
             message=(
-                f"Subchain test [{self.start_module_id} … {self.end_module_id}]: "
+                f"Subchain test [{start_module_id} … {end_module_id}]: "
                 f"lamp is {status} when only these modules are in the circuit."
             ),
         )
+
+
+# Backward-compatible alias used by tests and imports written before the rename.
+TestControlSubchain = DetachSequenceOfControlModulesAndAttachItToPowerAndLoad

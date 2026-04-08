@@ -34,7 +34,8 @@ from diagnosable_systems_simulation.actions.diagnostic_actions import (
     AdjustPotentiometer, ClosePeephole, InspectConnections, InvertEnclosure,
     MeasureCurrent, MeasureVoltage, MoveLED, ObserveComponent, OpenPeephole,
     ReplaceComponent, CloseSwitch, OpenSwitch, RestoreEnclosure, ShortPorts,
-    TestContinuity, TestControlSubchain, TestDiode, TestPathContinuity, VerifyRepair,
+    TestContinuity, DetachSequenceOfControlModulesAndAttachItToPowerAndLoad,
+    TestDiode, TestPathContinuity, VerifyRepair,
 )
 from diagnosable_systems_simulation.actions.fault_actions import (
     DegradeComponent, DisconnectCable, ForceSwitch, ReconnectCable,
@@ -95,10 +96,9 @@ _REGISTRY: dict[str, tuple] = {
         "source_port": "str — port name on source component to bridge (optional)",
         "target_port": "str — port name on sink component to bridge (optional)",
     }),
-    "test_control_subchain": (TestControlSubchain, {
-        "start_module_id": "str — component_id of the first control cube in the subsequence (e.g. 'cube_ctrl3')",
-        "end_module_id":   "str — component_id of the last control cube in the subsequence (e.g. 'cube_ctrl6')",
-    }),
+    "detach_sequence_of_control_modules_and_attach_it_to_power_and_load": (
+        DetachSequenceOfControlModulesAndAttachItToPowerAndLoad, {}
+    ),
 }
 
 # ---------------------------------------------------------------------------
@@ -182,16 +182,20 @@ If an action has no listed parameters, omit "params" entirely — do NOT include
 Never add keys to "params" that are not listed in the action's parameter description.
 Return ONLY the JSON array — no markdown fences, no commentary.
 
-Exception — test_path_continuity and short_ports use TWO component targets instead of "subject":
+Exception — the following actions use TWO component targets ("source" and "sink") instead of "subject":
   {"action_id": "test_path_continuity", "source": "<component_id>", "sink": "<component_id>", "params": {<optional port kwargs>}}
   {"action_id": "short_ports", "source": "<component_id>", "sink": "<component_id>", "params": {<optional port kwargs>}}
+  {"action_id": "detach_sequence_of_control_modules_and_attach_it_to_power_and_load", "source": "<first_ctrl_module_id>", "sink": "<last_ctrl_module_id>"}
+    — source is the first control module, sink is the last (e.g. "modules 1 to 4" → source="cube_ctrl1", sink="cube_ctrl4").
+    — Use this action whenever the instruction mentions testing, detaching, or bypassing a contiguous range of control modules.
+    — NEVER decompose this into individual disconnect_cable / reconnect_cable calls.
 
 Critical rules:
 - Map ONLY the core measurement or observation actions explicitly stated.
 - Do NOT infer or add context actions (e.g. switch operations, enclosure inversions, peephole openings) unless the description mentions them as context ("while the switch is closed", "with the enclosure open", etc.).
 - Do NOT add observe_component unless the instruction explicitly asks to visually inspect a component.
-- Every action except test_path_continuity and short_ports MUST include exactly one "subject".
-- Under no circumstances may an action be emitted without a "subject" (except the two multi-target exceptions above).
+- Every action except the three source/sink exceptions above MUST include exactly one "subject".
+- Under no circumstances may an action be emitted without a "subject" (except the three source/sink exceptions above).
 
 Plural / multi-component instructions:
 - If the instruction refers to multiple components (e.g., "all cables", "every wire", "all LEDs", "look at all the cables", "measure voltages everywhere"), you must output one action per component matching that noun category.
