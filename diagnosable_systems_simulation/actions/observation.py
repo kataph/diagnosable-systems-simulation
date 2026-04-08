@@ -106,7 +106,7 @@ def observe_component(
 
         # Type-specific visual properties
         from diagnosable_systems_simulation.world.components import (
-            Switch, LED, Bulb, Fuse, Potentiometer
+            Cable, Switch, LED, Bulb, Fuse, Potentiometer
         )
         if isinstance(component, Switch):
             record.add("is_closed", component.is_closed)
@@ -121,6 +121,33 @@ def observe_component(
             record.add("is_blown", component.is_blown)
         if isinstance(component, Potentiometer):
             record.add("wiper_position", component.wiper_position)
+        if isinstance(component, Cable):
+            # For each port, report its connection status.
+            # Enclosed ports inside a non-inverted enclosure are reported as hidden,
+            # not omitted — so the agent knows it cannot assess that end.
+            system = context.extra.get("_system")
+            for port in component.ports:
+                enc_id = component.port_enclosures.get(port.name)
+                if enc_id is None:
+                    # External port — always visible.
+                    status = "disconnected" if port.node_id is None else "connected"
+                    record.add(f"port_{port.name}_status", status)
+                else:
+                    # Enclosed port — visible only when enclosure is inverted.
+                    visible = False
+                    enc_name = enc_id
+                    if system is not None:
+                        try:
+                            enc = system.component(enc_id)
+                            enc_name = enc.display_name
+                            visible = enc.is_inverted
+                        except (KeyError, AttributeError):
+                            pass
+                    if visible:
+                        status = "disconnected" if port.node_id is None else "connected"
+                        record.add(f"port_{port.name}_status", status)
+                    else:
+                        record.add(f"port_{port.name}_status", f"hidden (inside {enc_name})")
 
     if include_measurements and Affordance.MEASURABLE in active and result is not None:
         for port in component.ports:

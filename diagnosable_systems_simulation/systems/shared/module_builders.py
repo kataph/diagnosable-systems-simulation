@@ -124,6 +124,9 @@ def create_psu_module(x_left: float = 0.0) -> SimpleNamespace:
         display_name="PSU Output Cable (−)",
         position=Position(x + 0.10, 0.05, 0.03),
     )
+    # p-terminals connect inside the PSU cube; n-terminals are external connectors.
+    cable_pos.port_enclosures = {"p": cube.component_id}
+    cable_neg.port_enclosures = {"p": cube.component_id}
 
     # LED-slot metadata used by MoveLED action.
     # The slot anchors are the components/ports the resistor.p and LED.cathode
@@ -247,6 +250,12 @@ def create_3cubes_control_module(
     cable_in_neg  = Cable(f"{p}cable_in_neg",  "Control Input Cable (−)",  position=Position(x,        0.05, 0.03))
     cable_out_pos = Cable(f"{p}cable_out_pos", "Control Output Cable (+)", position=Position(x + 0.10, 0.05, 0.07))
     cable_out_neg = Cable(f"{p}cable_out_neg", "Control Output Cable (−)", position=Position(x + 0.10, 0.05, 0.03))
+    # n-terminals of input cables connect inside the ctrl cube (switch.p and ground junction).
+    # p-terminals of output cables connect inside the ctrl cube (switch.n and ground junction).
+    cable_in_pos.port_enclosures  = {"n": cube.component_id}
+    cable_in_neg.port_enclosures  = {"n": cube.component_id}
+    cable_out_pos.port_enclosures = {"p": cube.component_id}
+    cable_out_neg.port_enclosures = {"p": cube.component_id}
 
     all_comps = [cube, switch, red_led, red_resistor,
                  cable_in_pos, cable_in_neg, cable_out_pos, cable_out_neg]
@@ -349,6 +358,12 @@ def create_10cubes_control_module(
     cable_in_neg  = Cable(f"{p}cable_in_neg",  f"Control Input Cable (−){lbl}",  position=Position(x,        0.05, 0.03))
     cable_out_pos = Cable(f"{p}cable_out_pos", f"Control Output Cable (+){lbl}", position=Position(x + 0.10, 0.05, 0.07))
     cable_out_neg = Cable(f"{p}cable_out_neg", f"Control Output Cable (−){lbl}", position=Position(x + 0.10, 0.05, 0.03))
+    # n-terminals of input cables connect inside the ctrl cube (switch.p and ground junction).
+    # p-terminals of output cables connect inside the ctrl cube (switch.n and ground junction).
+    cable_in_pos.port_enclosures  = {"n": cube.component_id}
+    cable_in_neg.port_enclosures  = {"n": cube.component_id}
+    cable_out_pos.port_enclosures = {"p": cube.component_id}
+    cable_out_neg.port_enclosures = {"p": cube.component_id}
 
     # LED-slot metadata used by MoveLED action.
     # switch.n is the positive anchor (where resistor.p connects);
@@ -474,6 +489,9 @@ def create_load_module(x_left: float = 0.30) -> SimpleNamespace:
     )
     cable_pos = Cable("load_cable_pos", "Load Input Cable (+)", position=Position(x,        0.05, 0.07))
     cable_neg = Cable("load_cable_neg", "Load Input Cable (−)", position=Position(x,        0.05, 0.03))
+    # n-terminals connect inside the load cube (diode anode and bulb negative rails).
+    cable_pos.port_enclosures = {"n": cube.component_id}
+    cable_neg.port_enclosures = {"n": cube.component_id}
 
     all_comps = [cube, peephole, main_bulb, internal_bulb, load_diode, cable_pos, cable_neg]
     ns = SimpleNamespace(

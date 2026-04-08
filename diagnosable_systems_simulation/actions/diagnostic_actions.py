@@ -823,12 +823,27 @@ class InspectConnections(Action):
         return ok, "; ".join(failures)
 
     def execute(self, targets, graph, context, last_result):
-        from diagnosable_systems_simulation.world.components import Cable
+        from diagnosable_systems_simulation.world.components import Cable, PhysicalEnclosure
         comp = targets["subject"]
         record = ObservationRecord(
             component_id=comp.component_id,
             action_id=self.action_id,
         )
+
+        # For cables, auto-invert any enclosures containing enclosed ports so that
+        # all port connection statuses can be physically verified.
+        auto_inverted: list[str] = []
+        if isinstance(comp, Cable):
+            system = context.extra.get("_system")
+            if system is not None:
+                for port_name, enc_id in comp.port_enclosures.items():
+                    try:
+                        enc = system.component(enc_id)
+                        if isinstance(enc, PhysicalEnclosure) and not enc.is_inverted:
+                            enc.is_inverted = True
+                            auto_inverted.append(enc.display_name)
+                    except (KeyError, AttributeError):
+                        pass
 
         # Build node → [cable_display_name, ...] index from the circuit graph
         node_cables: dict[str, list[str]] = {}
@@ -849,14 +864,18 @@ class InspectConnections(Action):
                 lines.append(f"port '{port.name}': {cable_str}")
                 record.add(f"port_{port.name}", cable_str)
 
+        if auto_inverted:
+            record.add("auto_inverted_enclosures", "; ".join(auto_inverted))
+
         summary = "; ".join(lines)
         anomalies = _nearby_anomalies(comp, graph)
         if anomalies:
             record.add("nearby_anomalies", "; ".join(anomalies))
         anomaly_suffix = (" NEARBY ANOMALY: " + "; ".join(anomalies)) if anomalies else ""
+        invert_note = (f" (auto-inverted: {', '.join(auto_inverted)})" if auto_inverted else "")
         return ActionResult(
             observation=record,
-            message=f"Connections on {comp.display_name!r}: {summary}.{anomaly_suffix}",
+            message=f"Connections on {comp.display_name!r}: {summary}.{anomaly_suffix}{invert_note}",
         )
 
 

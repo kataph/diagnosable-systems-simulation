@@ -295,6 +295,9 @@ class Cable(Component):
         enclosure_id: Optional[str] = None,
     ):
         self.resistance = resistance
+        # Maps port name → enclosure component_id for ports routed inside an enclosure.
+        # Only ports listed here are considered "enclosed"; unlisted ports are external.
+        self.port_enclosures: dict[str, str] = {}
         super().__init__(
             component_id=component_id,
             display_name=display_name,
@@ -303,7 +306,12 @@ class Cable(Component):
                 ElectricalPort("n", PortRole.NEGATIVE),
             ],
             affordances=AffordanceSet(
-                static={Affordance.REACHABLE, Affordance.DETACHABLE, Affordance.MEASURABLE}
+                static={
+                    Affordance.OBSERVABLE,
+                    Affordance.REACHABLE,
+                    Affordance.DETACHABLE,
+                    Affordance.MEASURABLE,
+                }
             ),
             position=position,
             enclosure_id=enclosure_id,
