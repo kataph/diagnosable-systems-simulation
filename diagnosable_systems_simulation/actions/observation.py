@@ -71,6 +71,7 @@ def observe_component(
     context: WorldContext,
     action_id: str,
     result: Optional[SimulationResult] = None,
+    include_measurements: bool = True,
 ) -> ObservationRecord:
     """
     Create an ``ObservationRecord`` for ``component`` containing only
@@ -78,9 +79,13 @@ def observe_component(
 
     What is included:
     - If OBSERVABLE: visual/state properties (switch position, LED color,
-      component type, fault presence).
-    - If MEASURABLE and a result is provided: port voltages and branch
-      current from the simulation result.
+      component type, fault presence, is_lit for light-emitting components).
+    - If MEASURABLE, a result is provided, and ``include_measurements`` is
+      True: port voltages and branch current from the simulation result.
+
+    ``include_measurements`` should be False for purely visual inspection
+    actions (e.g. ObserveComponent) so that electrical quantities are not
+    revealed without a dedicated measurement action.
     """
     record = ObservationRecord(
         component_id=component.component_id,
@@ -93,7 +98,11 @@ def observe_component(
     if Affordance.OBSERVABLE in active:
         record.add("display_name", component.display_name)
         record.add("type", type(component).__name__)
-        record.add("has_fault", component.has_fault())
+        # Only internal faults that produce a visible external sign are captured
+        # here.  Interface faults (e.g. a disconnected cable end) and
+        # non-observable internal faults (e.g. a fractured conductor hidden
+        # inside cable insulation) are NOT reflected by this property.
+        record.add("has_observable_internal_fault", component.has_fault())
 
         # Type-specific visual properties
         from diagnosable_systems_simulation.world.components import (
@@ -113,7 +122,7 @@ def observe_component(
         if isinstance(component, Potentiometer):
             record.add("wiper_position", component.wiper_position)
 
-    if Affordance.MEASURABLE in active and result is not None:
+    if include_measurements and Affordance.MEASURABLE in active and result is not None:
         for port in component.ports:
             if port.node_id is not None:
                 v = result.voltage(port.node_id)

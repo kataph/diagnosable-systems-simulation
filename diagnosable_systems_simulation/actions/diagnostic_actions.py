@@ -96,7 +96,8 @@ class ObserveComponent(Action):
     def execute(self, targets, graph, context, last_result):
         comp = targets["subject"]
         return ActionResult(
-            observation=observe_component(comp, context, self.action_id, last_result),
+            observation=observe_component(comp, context, self.action_id, last_result,
+                                          include_measurements=False),
             message=f"Observed {comp.display_name!r}.",
         )
 
