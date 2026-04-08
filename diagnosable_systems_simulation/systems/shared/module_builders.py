@@ -73,8 +73,8 @@ def create_psu_module(x_left: float = 0.0) -> SimpleNamespace:
         position=Position(x + 0.05, 0.05, 0.05),
     )
     source = VoltageSource(
-        component_id="psu_source",
-        display_name="12V Power Supply",
+        component_id="battery",
+        display_name="Battery",
         voltage=12.0,
         position=Position(x + 0.05, 0.05, 0.05),
         enclosure_id="cube_psu",
@@ -419,7 +419,7 @@ def create_load_module(x_left: float = 0.30) -> SimpleNamespace:
     )
     internal_bulb = Bulb(
         component_id="internal_bulb",
-        display_name="Internal Indicator Bulb",
+        display_name="Internal Indicator Lamp",
         resistance=500.0,
         power_threshold=0.01,
         position=Position(x + 0.05, 0.05, 0.05),

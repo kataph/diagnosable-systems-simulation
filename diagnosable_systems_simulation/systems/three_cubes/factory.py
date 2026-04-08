@@ -34,7 +34,7 @@ def _build_kg() -> SystemGraph:
      main_bulb, internal_bulb, load_diode, load_cable_pos, load_cable_neg,
      load_peephole) = (
         c.cube_psu, c.cube_ctrl, c.cube_load,
-        c.psu_source, c.psu_green_led, c.psu_green_resistor, c.psu_cable_pos, c.psu_cable_neg,
+        c.battery, c.psu_green_led, c.psu_green_resistor, c.psu_cable_pos, c.psu_cable_neg,
         c.ctrl_switch, c.ctrl_red_led, c.ctrl_red_resistor,
         c.ctrl_cable_in_pos, c.ctrl_cable_in_neg, c.ctrl_cable_out_pos, c.ctrl_cable_out_neg,
         c.main_bulb, c.internal_bulb, c.load_diode, c.load_cable_pos, c.load_cable_neg,

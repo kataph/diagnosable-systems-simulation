@@ -59,7 +59,7 @@ separator("Nominal simulation")
 result = system.simulate()
 print(f"  converged : {result.converged}")
 print(f"  lit       : {result.emitting_light}")
-psu_pos_node = system.graph.nodes_of("psu_source")["pos"]
+psu_pos_node = system.graph.nodes_of("battery")["pos"]
 print(f"  psu_pos   : {result.voltage(psu_pos_node):.2f} V")
 
 # ── Observe a component that is always visible ───────────────────────────────
@@ -170,11 +170,11 @@ s.inject_fault(DegradeComponent({"resistance": 1e9}), {"subject": s.component("m
 show("S1 burned lamp filaments", s, (True, False, False), "(internal_bulb still lit but hidden inside cube)")
 
 s = fresh()
-s.inject_fault(DegradeComponent({"voltage": 0.0}), {"subject": s.component("psu_source")})
+s.inject_fault(DegradeComponent({"voltage": 0.0}), {"subject": s.component("battery")})
 show("S2 battery depleted", s, (False, False, False))
 
 s = fresh()
-s.inject_fault(DegradeComponent({"voltage": -12.0}), {"subject": s.component("psu_source")})
+s.inject_fault(DegradeComponent({"voltage": -12.0}), {"subject": s.component("battery")})
 show("S3 battery reversed", s, (False, True, False))
 
 s = fresh()

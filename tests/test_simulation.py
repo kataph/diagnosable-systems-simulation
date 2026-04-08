@@ -108,7 +108,7 @@ class TestNominalLights:
 
 class TestNominalVoltages:
     def test_psu_source_voltage(self, nominal):
-        psu_pos_node = nominal.graph.nodes_of("psu_source")["pos"]
+        psu_pos_node = nominal.graph.nodes_of("battery")["pos"]
         v = nominal.last_result.voltage(psu_pos_node)
         assert v is not None
         assert 11.0 < v <= 12.01, f"PSU positive rail should be near 12 V, got {v:.3f}"
@@ -237,14 +237,14 @@ class TestFaultScenarios:
     def test_S2_battery_depleted(self, backend):
         s = _fresh(backend)
         s.inject_fault(DegradeComponent({"voltage": 0.0}),
-                       {"subject": s.component("psu_source")})
+                       {"subject": s.component("battery")})
         assert self._lights(s) == (False, False, False), \
             f"S2: got {self._lights(s)}"
 
     def test_S3_battery_reversed(self, backend):
         s = _fresh(backend)
         s.inject_fault(DegradeComponent({"voltage": -12.0}),
-                       {"subject": s.component("psu_source")})
+                       {"subject": s.component("battery")})
         assert self._lights(s) == (False, True, False), \
             f"S3: got {self._lights(s)}"
 
