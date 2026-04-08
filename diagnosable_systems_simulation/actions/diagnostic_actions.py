@@ -672,8 +672,14 @@ class TestPathContinuity(Action):
             action_id=self.action_id,
         )
 
-        node_a = self._pick_node(source, self.source_port)
-        node_b = self._pick_node(sink, self.sink_port)
+        if source.component_id == sink.component_id and len(source.ports) >= 2:
+            # Probing a component against itself: span across its two ports so we
+            # actually measure its internal resistance (e.g. open vs closed switch).
+            node_a = source.ports[0].node_id
+            node_b = source.ports[-1].node_id
+        else:
+            node_a = self._pick_node(source, self.source_port)
+            node_b = self._pick_node(sink, self.sink_port)
 
         record.add("source", source.display_name)
         record.add("sink", sink.display_name)
