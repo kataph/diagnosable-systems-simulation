@@ -34,7 +34,7 @@ from diagnosable_systems_simulation.actions.diagnostic_actions import (
     AdjustPotentiometer, ClosePeephole, InspectConnections, InvertEnclosure,
     MeasureCurrent, MeasureVoltage, MoveLED, ObserveComponent, OpenPeephole,
     ReplaceComponent, CloseSwitch, OpenSwitch, RestoreEnclosure, ShortPorts,
-    TestContinuity, TestDiode, TestPathContinuity, VerifyRepair,
+    TestContinuity, TestControlSubchain, TestDiode, TestPathContinuity, VerifyRepair,
 )
 from diagnosable_systems_simulation.actions.fault_actions import (
     DegradeComponent, DisconnectCable, ForceSwitch, ReconnectCable,
@@ -94,6 +94,10 @@ _REGISTRY: dict[str, tuple] = {
     "short_ports":         (ShortPorts,         {
         "source_port": "str — port name on source component to bridge (optional)",
         "target_port": "str — port name on sink component to bridge (optional)",
+    }),
+    "test_control_subchain": (TestControlSubchain, {
+        "start_module_id": "str — component_id of the first control cube in the subsequence (e.g. 'cube_ctrl3')",
+        "end_module_id":   "str — component_id of the last control cube in the subsequence (e.g. 'cube_ctrl6')",
     }),
 }
 

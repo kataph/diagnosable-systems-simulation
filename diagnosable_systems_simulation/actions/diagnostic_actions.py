@@ -1124,3 +1124,170 @@ class ShortPorts(Action):
                 f"with 0.01 Ω bridge (nodes {node_a} ↔ {node_b})."
             )
         )
+
+
+class TestControlSubchain(Action):
+    """
+    Isolate a contiguous subsequence of control modules (from *start_module_id*
+    to *end_module_id* inclusive) and temporarily wire it directly between the
+    PSU output cables and the load input cables, bypassing all other control
+    modules.  The circuit is then simulated to check whether the load lights up.
+
+    This models the physical diagnostic step of detaching a segment of the
+    series chain and connecting it to PSU and load to test it in isolation.
+
+    Implementation
+    --------------
+    Rewiring is done by composing DisconnectCable / ReconnectCable sub-actions,
+    so cost is the sum of those sub-action costs.  The full system state is
+    saved via ``system.snapshot()`` before any wiring change and restored
+    unconditionally afterwards — no manual port-by-port bookkeeping.
+
+    Constructor parameters
+    ----------------------
+    start_module_id : str
+        component_id of the first PhysicalEnclosure in the subsequence
+        (e.g. ``"cube_ctrl3"``).
+    end_module_id : str
+        component_id of the last PhysicalEnclosure in the subsequence
+        (e.g. ``"cube_ctrl6"``).
+
+    targets: {}   (modules are identified by constructor params, not KG targets)
+    """
+
+    action_id = "test_control_subchain"
+    description = (
+        "Detach a contiguous sequence of control modules from the circuit and "
+        "connect them directly between PSU and load to test if the load lights up."
+    )
+    # Base cost covers the simulation run; cable disconnect/reconnect costs are
+    # accumulated from sub-actions below.
+    cost = ActionCost(time=0.0)
+
+    def __init__(self, start_module_id: str = "", end_module_id: str = ""):
+        self.start_module_id = start_module_id
+        self.end_module_id = end_module_id
+
+    def check_preconditions(self, targets, context):
+        if not self.start_module_id or not self.end_module_id:
+            return False, "start_module_id and end_module_id are required."
+        return True, ""
+
+    def execute(self, targets, graph, context, last_result):
+        from diagnosable_systems_simulation.actions.fault_actions import (
+            DisconnectCable, ReconnectCable,
+        )
+        from diagnosable_systems_simulation.world.components import Bulb
+
+        system = context.extra.get("_system")
+        if system is None:
+            return ActionResult(success=False, message="System not available in context.")
+
+        def _prefix(cube_id: str) -> str:
+            return cube_id.removeprefix("cube_")
+
+        start_pfx = _prefix(self.start_module_id)
+        end_pfx   = _prefix(self.end_module_id)
+
+        try:
+            # Left boundary: input cables of the first module in the subchain
+            start_in_pos = system.component(f"{start_pfx}_cable_in_pos")
+            start_in_neg = system.component(f"{start_pfx}_cable_in_neg")
+            # Right boundary: output cables of the last module in the subchain
+            end_out_pos  = system.component(f"{end_pfx}_cable_out_pos")
+            end_out_neg  = system.component(f"{end_pfx}_cable_out_neg")
+            # PSU output cables (fixed IDs, always the same)
+            psu_out_pos  = system.component("psu_cable_pos")
+            psu_out_neg  = system.component("psu_cable_neg")
+            # Load input cables (fixed IDs, always the same)
+            load_in_pos  = system.component("load_cable_pos")
+            load_in_neg  = system.component("load_cable_neg")
+        except KeyError as e:
+            return ActionResult(success=False, message=f"Cable not found: {e}")
+
+        # ── Save full system state — restored unconditionally at the end ───
+        snap = system.snapshot()
+
+        accumulated_cost = ActionCost(time=0.0)
+
+        def _sub(action, subject):
+            nonlocal accumulated_cost
+            result = system.apply_action(action, {"subject": subject})
+            accumulated_cost = ActionCost(
+                time=accumulated_cost.time + action.cost.time,
+                equipment=list(set(accumulated_cost.equipment) | set(action.cost.equipment)),
+            )
+            return result
+
+        # ── Rewire: detach PSU cables from their current downstream and
+        #           attach to subchain input; detach subchain output and
+        #           attach to load cables. ───────────────────────────────────
+        #
+        # Record the node IDs we need BEFORE disconnecting anything.
+        subchain_in_pos_node  = start_in_pos.port("p").node_id
+        subchain_in_neg_node  = start_in_neg.port("p").node_id
+        subchain_out_pos_node = end_out_pos.port("n").node_id
+        subchain_out_neg_node = end_out_neg.port("n").node_id
+
+        if None in (subchain_in_pos_node, subchain_in_neg_node,
+                    subchain_out_pos_node, subchain_out_neg_node):
+            system.restore_snapshot(snap)
+            return ActionResult(
+                success=False,
+                message="One or more subchain boundary ports are floating — cannot rewire.",
+            )
+
+        # Disconnect PSU output cables from wherever they currently connect
+        _sub(DisconnectCable(port_names=["n"]), psu_out_pos)
+        _sub(DisconnectCable(port_names=["n"]), psu_out_neg)
+        # Disconnect subchain input cables from wherever they currently connect
+        _sub(DisconnectCable(port_names=["p"]), start_in_pos)
+        _sub(DisconnectCable(port_names=["p"]), start_in_neg)
+        # Reconnect: PSU out → subchain in
+        _sub(ReconnectCable({"n": subchain_in_pos_node}), psu_out_pos)
+        _sub(ReconnectCable({"n": subchain_in_neg_node}), psu_out_neg)
+        _sub(ReconnectCable({"p": subchain_in_pos_node}), start_in_pos)
+        _sub(ReconnectCable({"p": subchain_in_neg_node}), start_in_neg)
+
+        # Disconnect subchain output cables from wherever they currently connect
+        _sub(DisconnectCable(port_names=["n"]), end_out_pos)
+        _sub(DisconnectCable(port_names=["n"]), end_out_neg)
+        # Disconnect load input cables from wherever they currently connect
+        _sub(DisconnectCable(port_names=["p"]), load_in_pos)
+        _sub(DisconnectCable(port_names=["p"]), load_in_neg)
+        # Reconnect: subchain out → load in
+        _sub(ReconnectCable({"n": subchain_out_pos_node}), end_out_pos)
+        _sub(ReconnectCable({"n": subchain_out_neg_node}), end_out_neg)
+        _sub(ReconnectCable({"p": subchain_out_pos_node}), load_in_pos)
+        _sub(ReconnectCable({"p": subchain_out_neg_node}), load_in_neg)
+
+        # ── Simulate and check load bulbs only ─────────────────────────────
+        sim_result = system.simulate()
+        bulb_ids = {
+            cid for cid, comp in system.all_components().items()
+            if isinstance(comp, Bulb)
+        }
+        lamp_on = bool(sim_result.emitting_light & bulb_ids)
+
+        # ── Restore full system state in one operation ─────────────────────
+        system.restore_snapshot(snap)
+
+        # Update own cost to reflect sub-action accumulation
+        self.cost = accumulated_cost
+
+        record = ObservationRecord(
+            component_id=f"subchain_{start_pfx}_to_{end_pfx}",
+            action_id=self.action_id,
+        )
+        record.add("start_module", self.start_module_id)
+        record.add("end_module", self.end_module_id)
+        record.add("lamp_on", lamp_on)
+
+        status = "ON" if lamp_on else "OFF"
+        return ActionResult(
+            observation=record,
+            message=(
+                f"Subchain test [{self.start_module_id} … {self.end_module_id}]: "
+                f"lamp is {status} when only these modules are in the circuit."
+            ),
+        )
