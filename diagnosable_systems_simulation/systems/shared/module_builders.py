@@ -412,6 +412,11 @@ def create_load_module(x_left: float = 0.30) -> SimpleNamespace:
         position=Position(x, 0.10, 0.05),
         enclosure_id="cube_load",
     )
+    peephole._nominal_observation_note = (
+        "This is an access hole on the load cube, not a sensor or light source. "
+        "To look inside: first call open_peephole on load_peephole, "
+        "then call observe_component on internal_bulb."
+    )
 
     def _visible(component, _ctx):
         """Visible when cube is inverted OR peephole is open (but not necessarily reachable)."""
