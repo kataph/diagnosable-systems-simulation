@@ -5,6 +5,7 @@ from diagnosable_systems_simulation.actions.observation import ObservationRecord
 from diagnosable_systems_simulation.actions.preconditions import (
     AffordanceRequirement, ToolRequirement, PreconditionChecker
 )
+from diagnosable_systems_simulation.systems.base_system import DiagnosableSystem
 from diagnosable_systems_simulation.world.affordances import Affordance
 
 
@@ -1215,7 +1216,7 @@ class DetachSequenceOfControlModulesAndAttachItToPowerAndLoad(Action):
             load_in_pos  = system.component("load_cable_pos")
             load_in_neg  = system.component("load_cable_neg")
         except KeyError as e:
-            return ActionResult(success=False, message=f"Cable not found: {e}")
+            return ActionResult(success=False, message=f"Cable not found: {e}. All components are {system.all_components()}")
 
         # ── Save full system state — restored unconditionally at the end ───
         snap = system.snapshot()
