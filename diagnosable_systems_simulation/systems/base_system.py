@@ -263,6 +263,11 @@ class DiagnosableSystem:
                 for cid, c in comps.items()
                 if hasattr(c, "_orig_connections")
             },
+            "detached_cable_ports": {
+                cid: dict(c._detached_cable_ports)
+                for cid, c in comps.items()
+                if hasattr(c, "_detached_cable_ports")
+            },
             "static_affordances": {
                 cid: set(c.affordances._static)
                 for cid, c in comps.items()
@@ -308,6 +313,13 @@ class DiagnosableSystem:
                 comp._orig_connections = dict(orig)
             elif hasattr(comp, "_orig_connections"):
                 comp._orig_connections = {}
+                
+            # --- _detached_cable_ports for cable-neightbour -----------------------------
+            detached = snap["detached_cable_ports"].get(cid)
+            if detached is not None:
+                comp._detached_cable_ports = dict(detached)
+            elif hasattr(comp, "_detached_cable_ports"):
+                comp._detached_cable_ports = {}
 
             # --- Static affordances --------------------------------------
             snap_static = snap["static_affordances"].get(cid, set())
@@ -357,6 +369,17 @@ class DiagnosableSystem:
                         # Connected to wrong net (crossed-cable fault).
                         self._graph.disconnect_port(cid, port_name)
                         self._graph.reconnect_port(cid, port_name, node_id)
+            if (detached := getattr(comp, "_detached_cable_ports", {})): 
+                for p_port, (cid, c_port, nid) in detached.items():
+                    cable = self.component(cid)
+                    self._graph.reconnect_port(cable.component_id, c_port, nid)
+                    cable.affordances.discard(Affordance.RECONNECTABLE)
+                    del comp._detached_cable_ports[p_port]
+
+                if not comp._detached_cable_ports:
+                    comp.affordances.discard(Affordance.RECONNECTABLE)
+                    # Optional: remove the empty attribute to keep objects clean
+                    del comp._detached_cable_ports
             if comp._fault_overlay:
                 comp._fault_overlay.clear()
 
@@ -423,6 +446,17 @@ class DiagnosableSystem:
                         # Connected to wrong net (crossed-cable fault).
                         self._graph.disconnect_port(cid, port_name)
                         self._graph.reconnect_port(cid, port_name, node_id)
+            if (detached := getattr(comp, "_detached_cable_ports", {})): 
+                for p_port, (cid, c_port, nid) in detached.items():
+                    cable = self.component(cid)
+                    self._graph.reconnect_port(cable.component_id, c_port, nid)
+                    cable.affordances.discard(Affordance.RECONNECTABLE)
+                    del comp._detached_cable_ports[p_port]
+
+                if not comp._detached_cable_ports:
+                    comp.affordances.discard(Affordance.RECONNECTABLE)
+                    # Optional: remove the empty attribute to keep objects clean
+                    del comp._detached_cable_ports
             if comp._fault_overlay:
                 comp._fault_overlay.clear()
 

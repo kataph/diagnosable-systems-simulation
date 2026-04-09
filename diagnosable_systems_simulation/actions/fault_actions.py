@@ -12,7 +12,10 @@ class DisconnectCable(Action):
     Physically detach a cable from the circuit.
 
     The cable's ports become floating (node_id = None).
-    DETACHABLE affordance is replaced with RECONNECTABLE.
+    DETACHABLE affordance is replaced with RECONNECTABLE. 
+    
+    Neightbouring components are also affected: their status
+    as disconnected is saved in their affordances. 
 
     targets: {"cable": <Cable component>}
     port_names: ports to disconnect; None means all ports.
@@ -36,15 +39,35 @@ class DisconnectCable(Action):
     def execute(self, targets, graph, context, last_result):
         cable = targets["subject"]
         ports = self.port_names or [p.name for p in cable.ports]
-        # Save original node_ids before disconnecting so they can be restored later.
-        cable._orig_connections = {
+        # Collect node_ids BEFORE disconnecting so we can find peer components.
+        port_nodes: dict[str, str] = {
             p: cable.port(p).node_id
             for p in ports
             if cable.port(p).node_id is not None
         }
+        # Mark every non-cable component sharing a node with a disconnected port
+        # as RECONNECTABLE and record the port-to-cable mapping on it.  This lets
+        # the repair layer know that fixing e.g. "Switch3" means reconnecting
+        # the cable port that was detached from it.
+        for cable_port_name, node_id in port_nodes.items():
+            for edge in graph.get_netlist():
+                if edge.component_id == cable.component_id:
+                    continue
+                for peer_port_name, peer_node_id in edge.port_nodes.items():
+                    if peer_node_id != node_id:
+                        continue
+                    peer = edge.component
+                    if not hasattr(peer, "_detached_cable_ports"):
+                        peer._detached_cable_ports = {}
+                    peer._detached_cable_ports[peer_port_name] = (
+                        cable.component_id, cable_port_name, node_id
+                    )
+                    peer.affordances.add(Affordance.RECONNECTABLE)
+        # Save original connections on the cable and physically disconnect.
+        cable._orig_connections = dict(port_nodes)
         disconnected = [
             p for p in ports
-            if cable.port(p).node_id is not None
+            if port_nodes.get(p) is not None
             and graph.disconnect_port(cable.component_id, p) is not None
         ]
         cable.affordances.remove(Affordance.DETACHABLE)
@@ -61,6 +84,8 @@ class ReconnectCable(Action):
     ``DisconnectCable``.  This is the normal diagnostic use-case: a
     technician puts the cable back where it was without needing to know
     the underlying node IDs.
+    
+    Neightbouringh components status is also ripristinated. 
 
     targets: {"subject": <Cable>}
     connections: optional port name -> node_id override
@@ -92,8 +117,32 @@ class ReconnectCable(Action):
                     f"and no original connection data available."
                 ),
             )
-        for port_name, node_id in connections.items():
-            graph.reconnect_port(cable.component_id, port_name, node_id)
+        for cable_port_name, node_id in connections.items():
+            graph.reconnect_port(cable.component_id, cable_port_name, node_id)
+            # removes disconnected state change from neightbouring components
+            for edge in graph.get_netlist():
+                if edge.component_id == cable.component_id:
+                    continue
+                for peer_port_name, peer_node_id in edge.port_nodes.items():
+                    if peer_node_id != node_id:
+                        continue
+                    peer = edge.component
+                    if not hasattr(peer, "_detached_cable_ports"):
+                        continue
+
+                    to_delete = []
+                    for p_port, (cid, c_port, nid) in peer._detached_cable_ports.items():
+                        if cid == cable.component_id and nid == node_id:
+                            # This was the entry created by DisconnectCable
+                            to_delete.append(p_port)
+                    for p_port in to_delete:
+                        del peer._detached_cable_ports[p_port]
+
+                    if not peer._detached_cable_ports:
+                        peer.affordances.discard(Affordance.RECONNECTABLE)
+                        # Optional: remove the empty attribute to keep objects clean
+                        del peer._detached_cable_ports
+                  
         cable.affordances.remove(Affordance.RECONNECTABLE)
         cable.affordances.add(Affordance.DETACHABLE)
         return ActionResult(message=f"Reconnected {cable.display_name!r} to original position.")

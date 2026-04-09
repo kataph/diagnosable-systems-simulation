@@ -1231,11 +1231,14 @@ class DetachSequenceOfControlModulesAndAttachItToPowerAndLoad(Action):
             )
             return result
 
-        # ── Rewire: detach PSU cables from their current downstream and
-        #           attach to subchain input; detach subchain output and
-        #           attach to load cables. ───────────────────────────────────
+        # ── Rewire: only the two boundary cables on each side need to move.
         #
-        # Record the node IDs we need BEFORE disconnecting anything.
+        # Left boundary: move PSU output cables to the subchain's input nodes.
+        #   The subchain input cables themselves stay put.
+        # Right boundary: move load input cables to the subchain's output nodes.
+        #   The subchain output cables themselves stay put.
+        #
+        # Record the destination node IDs BEFORE disconnecting anything.
         subchain_in_pos_node  = start_in_pos.port("p").node_id
         subchain_in_neg_node  = start_in_neg.port("p").node_id
         subchain_out_pos_node = end_out_pos.port("n").node_id
@@ -1249,27 +1252,15 @@ class DetachSequenceOfControlModulesAndAttachItToPowerAndLoad(Action):
                 message="One or more subchain boundary ports are floating — cannot rewire.",
             )
 
-        # Disconnect PSU output cables from wherever they currently connect
+        # Left boundary: move PSU n ports to subchain input nodes
         _sub(DisconnectCable(port_names=["n"]), psu_out_pos)
         _sub(DisconnectCable(port_names=["n"]), psu_out_neg)
-        # Disconnect subchain input cables from wherever they currently connect
-        _sub(DisconnectCable(port_names=["p"]), start_in_pos)
-        _sub(DisconnectCable(port_names=["p"]), start_in_neg)
-        # Reconnect: PSU out → subchain in
         _sub(ReconnectCable({"n": subchain_in_pos_node}), psu_out_pos)
         _sub(ReconnectCable({"n": subchain_in_neg_node}), psu_out_neg)
-        _sub(ReconnectCable({"p": subchain_in_pos_node}), start_in_pos)
-        _sub(ReconnectCable({"p": subchain_in_neg_node}), start_in_neg)
 
-        # Disconnect subchain output cables from wherever they currently connect
-        _sub(DisconnectCable(port_names=["n"]), end_out_pos)
-        _sub(DisconnectCable(port_names=["n"]), end_out_neg)
-        # Disconnect load input cables from wherever they currently connect
+        # Right boundary: move load p ports to subchain output nodes
         _sub(DisconnectCable(port_names=["p"]), load_in_pos)
         _sub(DisconnectCable(port_names=["p"]), load_in_neg)
-        # Reconnect: subchain out → load in
-        _sub(ReconnectCable({"n": subchain_out_pos_node}), end_out_pos)
-        _sub(ReconnectCable({"n": subchain_out_neg_node}), end_out_neg)
         _sub(ReconnectCable({"p": subchain_out_pos_node}), load_in_pos)
         _sub(ReconnectCable({"p": subchain_out_neg_node}), load_in_neg)
 
