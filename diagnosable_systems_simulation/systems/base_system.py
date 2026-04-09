@@ -373,11 +373,11 @@ class DiagnosableSystem:
                 for p_port, (cid, c_port, nid) in detached.items():
                     cable = self.component(cid)
                     self._graph.reconnect_port(cable.component_id, c_port, nid)
-                    cable.affordances.discard(Affordance.RECONNECTABLE)
+                    cable.affordances.remove(Affordance.RECONNECTABLE)
                     del comp._detached_cable_ports[p_port]
 
                 if not comp._detached_cable_ports:
-                    comp.affordances.discard(Affordance.RECONNECTABLE)
+                    comp.affordances.remove(Affordance.RECONNECTABLE)
                     # Optional: remove the empty attribute to keep objects clean
                     del comp._detached_cable_ports
             if comp._fault_overlay:
@@ -450,11 +450,11 @@ class DiagnosableSystem:
                 for p_port, (cid, c_port, nid) in detached.items():
                     cable = self.component(cid)
                     self._graph.reconnect_port(cable.component_id, c_port, nid)
-                    cable.affordances.discard(Affordance.RECONNECTABLE)
+                    cable.affordances.remove(Affordance.RECONNECTABLE)
                     del comp._detached_cable_ports[p_port]
 
                 if not comp._detached_cable_ports:
-                    comp.affordances.discard(Affordance.RECONNECTABLE)
+                    comp.affordances.remove(Affordance.RECONNECTABLE)
                     # Optional: remove the empty attribute to keep objects clean
                     del comp._detached_cable_ports
             if comp._fault_overlay:

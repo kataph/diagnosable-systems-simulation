@@ -139,7 +139,7 @@ class ReconnectCable(Action):
                         del peer._detached_cable_ports[p_port]
 
                     if not peer._detached_cable_ports:
-                        peer.affordances.discard(Affordance.RECONNECTABLE)
+                        peer.affordances.remove(Affordance.RECONNECTABLE)
                         # Optional: remove the empty attribute to keep objects clean
                         del peer._detached_cable_ports
                   
