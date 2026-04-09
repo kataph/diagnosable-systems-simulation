@@ -97,7 +97,7 @@ class ObserveComponent(Action):
         comp = targets["subject"]
         return ActionResult(
             observation=observe_component(comp, context, self.action_id, last_result,
-                                          include_measurements=False),
+                                          include_measurements=True),
             message=f"Observed {comp.display_name!r}.",
         )
 
