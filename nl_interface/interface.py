@@ -41,6 +41,7 @@ from diagnosable_systems_simulation.actions.fault_actions import (
     DegradeComponent, DisconnectCable, ForceSwitch, ReconnectCable,
 )
 from diagnosable_systems_simulation.systems.base_system import DiagnosableSystem
+from diagnosable_systems_simulation.world.components import Module
 
 MODEL = "nf-gpt-4o-2024-08-06"
 # MODEL = "gpt-4.1"
@@ -152,9 +153,20 @@ def _action_menu(registry: "dict | None" = None) -> str:
     return "\n".join(lines)
 
 
-def _component_menu(system) -> str:
+def _component_menu(system: DiagnosableSystem) -> str:
     from diagnosable_systems_simulation.world.knowledge_graph import EntityType
     lines = []
+    
+    # NEW: List Aggregates/Modules first so the LLM understands the hierarchy
+    lines.append("Aggregates (Modules):")
+    for cid, c in system.all_components().items():
+        if isinstance(c, Module):
+            # Fetch children to show the LLM what is inside
+            parts = [p.component_id for p in system.parts_of_module(cid)]
+            lines.append(f"- {cid}: {c.display_name} (Components that are part of the module: {', '.join(parts)})")
+    
+    
+    lines.append("\nIndividual Components:")
     for cid, c in system.kg.entities_of_type(EntityType.COMPONENT).items():
         enclosure_id = getattr(c, "enclosure_id", None)
         enclosure_note = f" [inside enclosure: {enclosure_id}]" if enclosure_id else ""
@@ -196,10 +208,12 @@ Critical rules:
 - Do NOT add observe_component unless the instruction explicitly asks to visually inspect a component.
 - Every action except the three source/sink exceptions above MUST include exactly one "subject".
 - Under no circumstances may an action be emitted without a "subject" (except the three source/sink exceptions above).
+- Distinguish between enclosures (e.g. a cube that contains some components) and aggragates/modules: the former is a thing that encloses some other components by virtue of its shape, the latter are things that are composed by multiple (sub-)components
 
 Plural / multi-component instructions:
 - If the instruction refers to multiple components (e.g., "all cables", "every wire", "all LEDs", "look at all the cables", "measure voltages everywhere"), you must output one action per component matching that noun category.
 - Each of those actions must include its own "subject" (or "source"/"sink" for continuity actions).
+- NEW: If an instruction targets an AGGREGATE or MODULE (e.g., "test the psu module", "measure voltages in ctrl_cube1"), you MUST emit one individual action for EVERY component listed as being aggregated by that module in the system menu.
 - Never emit a “global” action that lacks the required component fields.
 
 Component-matching for plural phrases:
@@ -214,7 +228,7 @@ Return format:
 """
 
 
-def _parse(text: str, system, model: str = MODEL, allowed_actions: "set[str] | None" = None, _logger: logging.Logger | None = None) -> list[dict]:
+def _parse(text: str, system: DiagnosableSystem, model: str = MODEL, allowed_actions: "set[str] | None" = None, _logger: logging.Logger | None = None) -> list[dict]:
     registry = (
         {k: v for k, v in _REGISTRY.items() if k in allowed_actions}
         if allowed_actions is not None

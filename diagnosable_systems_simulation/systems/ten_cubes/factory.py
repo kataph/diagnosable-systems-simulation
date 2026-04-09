@@ -67,15 +67,15 @@ def _build_kg() -> SystemGraph:
 
     # ── PART_OF ────────────────────────────────────────────────────────
     part_of(psu.source, psu.green_led, psu.green_resistor,
-            psu.cable_pos, psu.cable_neg, psu.battery_internal_resistor, module=psu.cube)
+            psu.cable_pos, psu.cable_neg, psu.battery_internal_resistor, module=psu.module)
 
     for ctrl in ctrl_mods:
         part_of(ctrl.switch, ctrl.green_led, ctrl.green_resistor,
                 ctrl.cable_in_pos, ctrl.cable_in_neg,
-                ctrl.cable_out_pos, ctrl.cable_out_neg,            module=ctrl.cube)
+                ctrl.cable_out_pos, ctrl.cable_out_neg,            module=ctrl.module)
 
     part_of(load.main_bulb, load.internal_bulb, load.peephole,
-            load.diode, load.cable_pos, load.cable_neg,            module=load.cube)
+            load.diode, load.cable_pos, load.cable_neg,            module=load.module)
 
     # ── CONTAINED_IN ──────────────────────────────────────────────────
     contained_in(psu.source, psu.green_led, psu.green_resistor, psu.battery_internal_resistor,  enclosure=psu.cube)

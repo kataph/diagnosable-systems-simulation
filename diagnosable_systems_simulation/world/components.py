@@ -449,6 +449,32 @@ class LightSensor(Component):
         return params
 
 
+class Module(Component):
+    """Functional aggregate of components"""
+    def __init__(
+        self,
+        component_id: str,
+        display_name: str,
+        subcomponents_ids: list[str] | None = None,
+        position: Optional[Position] = None,
+    ):
+        self.is_inverted: bool = False
+        self.contained_component_ids: list[str] = list(subcomponents_ids or [])
+        super().__init__(
+            component_id=component_id,
+            display_name=display_name,
+            ports=[],
+            affordances=AffordanceSet(
+                static={Affordance.REACHABLE, Affordance.MEASURABLE}
+            ),
+            position=position,
+            enclosure_id=None,
+        )
+
+    def nominal_parameters(self) -> dict:
+        return {}
+    
+    
 class PhysicalEnclosure(Component):
     """
     A physical enclosure (e.g. a wooden cube) that contains other components.

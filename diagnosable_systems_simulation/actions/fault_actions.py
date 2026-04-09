@@ -152,7 +152,7 @@ class ShortCircuit(Action):
     """
     Create a short between two nodes (fault injection).
 
-    targets: {} (no component targets — acts on nodes directly)
+    targets: {"start": "component1", "end": "component2"}
     """
 
     action_id = "short_circuit"
@@ -170,6 +170,15 @@ class ShortCircuit(Action):
 
     def execute(self, targets, graph, context, last_result):
         graph.short_nodes(self.node_a, self.node_b, self.short_id)
+        
+        comp1 = targets["start"]
+        comp2 = targets["end"]
+        comp1.apply_fault({"short_circuit_with": comp2.component_id})
+        comp2.apply_fault({"short_circuit_with": comp1.component_id})
+        return ActionResult(
+            message=f"Applied short fault overlay to components {comp1.display_name!r} and {comp2.display_name!r}.",
+        )
+        
         return ActionResult(message=f"Shorted nodes {self.node_a!r} and {self.node_b!r}.")
 
 

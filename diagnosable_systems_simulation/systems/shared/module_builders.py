@@ -30,7 +30,7 @@ from diagnosable_systems_simulation.world.affordances import (
     Affordance, AffordanceSet, ConditionalAffordance,
 )
 from diagnosable_systems_simulation.world.components import (
-    Bulb, Cable, Diode, LED, Peephole, PhysicalEnclosure, Resistor, Switch, VoltageSource,
+    Bulb, Cable, Diode, LED, Module, Peephole, PhysicalEnclosure, Resistor, Switch, VoltageSource,
 )
 from diagnosable_systems_simulation.world.spatial import Position
 
@@ -67,6 +67,11 @@ def create_psu_module(x_left: float = 0.0) -> SimpleNamespace:
     """
     x = x_left
 
+    module = Module(
+        component_id="module_psu",
+        display_name="Power Supply Module",
+        position=Position(x + 0.05, 0.05, 0.05),
+    )
     cube = PhysicalEnclosure(
         component_id="cube_psu",
         display_name="Power Supply Cube",
@@ -146,9 +151,9 @@ def create_psu_module(x_left: float = 0.0) -> SimpleNamespace:
     cube._led_slot_pos = (source, "pos")   # resistor.p connects here
     cube._led_slot_neg = (source, "neg")   # LED.cathode connects here (GND)
 
-    all_comps = [cube, source, green_led, green_resistor, cable_pos, cable_neg, battery_internal_resistor]
+    all_comps = [module, cube, source, green_led, green_resistor, cable_pos, cable_neg, battery_internal_resistor]
     ns = SimpleNamespace(
-        cube=cube, source=source, green_led=green_led,
+        module=module, cube=cube, source=source, green_led=green_led,
         green_resistor=green_resistor, cable_pos=cable_pos, cable_neg=cable_neg,
         battery_internal_resistor=battery_internal_resistor,
     )
@@ -200,6 +205,11 @@ def create_3cubes_control_module(
     p = prefix + "_"
     x = x_left
 
+    module = Module(
+        component_id=f"control_module_{prefix}",
+        display_name=f"Control Module",
+        position=Position(x + 0.05, 0.05, 0.05),
+    )
     cube = PhysicalEnclosure(
         component_id=f"cube_{prefix}",
         display_name="Control Cube",
@@ -268,10 +278,10 @@ def create_3cubes_control_module(
     cable_out_pos.port_enclosures = {"p": cube.component_id}
     cable_out_neg.port_enclosures = {"p": cube.component_id}
 
-    all_comps = [cube, switch, red_led, red_resistor,
+    all_comps = [module, cube, switch, red_led, red_resistor,
                  cable_in_pos, cable_in_neg, cable_out_pos, cable_out_neg]
     ns = SimpleNamespace(
-        cube=cube, switch=switch, red_led=red_led, red_resistor=red_resistor,
+        module=module, cube=cube, switch=switch, red_led=red_led, red_resistor=red_resistor,
         cable_in_pos=cable_in_pos, cable_in_neg=cable_in_neg,
         cable_out_pos=cable_out_pos, cable_out_neg=cable_out_neg,
     )
@@ -320,6 +330,12 @@ def create_10cubes_control_module(
     x = x_left
     lbl = f" {label}" if label is not None else ""
 
+    module = Module(
+        component_id=f"module_{prefix}",
+        display_name=f"Control Module{lbl}",
+        position=Position(x + 0.05, 0.05, 0.05),
+    )
+    
     cube = PhysicalEnclosure(
         component_id=f"cube_{prefix}",
         display_name=f"Control Cube{lbl}",
@@ -383,10 +399,10 @@ def create_10cubes_control_module(
     cube._led_slot_pos = (switch, "n")           # resistor.p connects here
     cube._led_slot_neg = (cable_in_neg, "n")     # LED.cathode connects here (GND)
 
-    all_comps = [cube, switch, green_led, green_resistor,
+    all_comps = [module, cube, switch, green_led, green_resistor,
                  cable_in_pos, cable_in_neg, cable_out_pos, cable_out_neg]
     ns = SimpleNamespace(
-        cube=cube, switch=switch, green_led=green_led, green_resistor=green_resistor,
+        module=module, cube=cube, switch=switch, green_led=green_led, green_resistor=green_resistor,
         cable_in_pos=cable_in_pos, cable_in_neg=cable_in_neg,
         cable_out_pos=cable_out_pos, cable_out_neg=cable_out_neg,
     )
@@ -412,6 +428,11 @@ def create_load_module(x_left: float = 0.30) -> SimpleNamespace:
     """
     x = x_left
 
+    module = Module(
+        component_id="module_load",
+        display_name="Load Module",
+        position=Position(x + 0.05, 0.05, 0.05),
+    )
     cube = PhysicalEnclosure(
         component_id="cube_load",
         display_name="Load Cube",
@@ -514,9 +535,9 @@ def create_load_module(x_left: float = 0.30) -> SimpleNamespace:
     cable_pos.port_enclosures = {"n": cube.component_id}
     cable_neg.port_enclosures = {"n": cube.component_id}
 
-    all_comps = [cube, peephole, main_bulb, internal_bulb, load_diode, cable_pos, cable_neg]
+    all_comps = [module, cube, peephole, main_bulb, internal_bulb, load_diode, cable_pos, cable_neg]
     ns = SimpleNamespace(
-        cube=cube, peephole=peephole, main_bulb=main_bulb, internal_bulb=internal_bulb,
+        module=module, cube=cube, peephole=peephole, main_bulb=main_bulb, internal_bulb=internal_bulb,
         diode=load_diode, cable_pos=cable_pos, cable_neg=cable_neg,
     )
     ns.ALL = {c.component_id: c for c in all_comps}

@@ -27,12 +27,14 @@ def _build_kg() -> SystemGraph:
     c = create_components()
 
     # Unpack for readable wiring below
-    (cube_psu, cube_ctrl, cube_load,
+    (module_psu, module_ctrl, module_load,
+     cube_psu, cube_ctrl, cube_load,
      power_source, battery_internal_resistor, psu_green_led, psu_green_resistor, psu_cable_pos, psu_cable_neg,
      ctrl_switch, ctrl_red_led, ctrl_red_resistor,
      ctrl_cable_in_pos, ctrl_cable_in_neg, ctrl_cable_out_pos, ctrl_cable_out_neg,
      main_bulb, internal_bulb, load_diode, load_cable_pos, load_cable_neg,
      load_peephole) = (
+         c.module_psu, c.module_ctrl, c.module_load,
         c.cube_psu, c.cube_ctrl, c.cube_load,
         c.battery, c.battery_internal_resistor, c.psu_green_led, c.psu_green_resistor, c.psu_cable_pos, c.psu_cable_neg,
         c.ctrl_switch, c.ctrl_red_led, c.ctrl_red_resistor,
@@ -55,14 +57,14 @@ def _build_kg() -> SystemGraph:
 
     # ── PART_OF  (enclosures act as module anchors) ────────────────────
     part_of(power_source, psu_green_led, psu_green_resistor,
-            psu_cable_pos, psu_cable_neg, battery_internal_resistor, module=cube_psu)
+            psu_cable_pos, psu_cable_neg, battery_internal_resistor, module=module_psu)
 
     part_of(ctrl_switch, ctrl_red_led, ctrl_red_resistor,
             ctrl_cable_in_pos, ctrl_cable_in_neg,
-            ctrl_cable_out_pos, ctrl_cable_out_neg,             module=cube_ctrl)
+            ctrl_cable_out_pos, ctrl_cable_out_neg,             module=module_ctrl)
 
     part_of(main_bulb, internal_bulb, load_diode, load_peephole,
-            load_cable_pos, load_cable_neg,                     module=cube_load)
+            load_cable_pos, load_cable_neg,                     module=module_load)
 
     # ── CONTAINED_IN ──────────────────────────────────────────────────
     contained_in(power_source, psu_green_led, psu_green_resistor, battery_internal_resistor, enclosure=cube_psu)

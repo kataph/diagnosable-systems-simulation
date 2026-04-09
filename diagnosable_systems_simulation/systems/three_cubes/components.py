@@ -38,6 +38,9 @@ def create_components() -> SimpleNamespace:
 
     # Flat attribute names that factory.py accesses directly.
     ns = SimpleNamespace(
+        module_psu=psu.module,
+        module_ctrl=ctrl.module,
+        module_load=load.module,
         cube_psu=psu.cube,
         cube_ctrl=ctrl.cube,
         cube_load=load.cube,

@@ -163,7 +163,7 @@ class CircuitGraph:
 
         return edge
 
-    def short_nodes(self, node_a: str, node_b: str, short_id: str, resistance: float = 1) -> None:
+    def short_nodes(self, node_a: str, node_b: str, short_id: str, resistance: float = 0.001) -> None:
         """
         Insert a resistor between two nodes.
 
