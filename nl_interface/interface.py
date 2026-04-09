@@ -210,6 +210,9 @@ Critical rules:
 - Under no circumstances may an action be emitted without a "subject" (except the three source/sink exceptions above).
 - Distinguish between enclosures (e.g. a cube that contains some components) and aggragates/modules: the former is a thing that encloses some other components by virtue of its shape, the latter are things that are composed by multiple (sub-)components
 
+Complex/Composite actions:
+- some actions will be made from multiple sub-actions. For instace, swapping two cables will require to disconnect and then reconnect the target cables exchanging their locations. If you meet a complex action, try to map it to a corresponding sequence of valid sub-actions. 
+
 Plural / multi-component instructions:
 - If the instruction refers to multiple components (e.g., "all cables", "every wire", "all LEDs", "look at all the cables", "measure voltages everywhere"), you must output one action per component matching that noun category.
 - Each of those actions must include its own "subject" (or "source"/"sink" for continuity actions).
@@ -439,6 +442,9 @@ def _execute(entries: list[dict], system, allowed_actions: "set[str] | None" = N
                 results.append((action, result))
                 continue
         except Exception as exc:
+            import traceback
+            if _logger:
+                _logger.debug(f"[{action_id}] exception:\n{traceback.format_exc()}")
             result = ActionResult(success=False, message=f"[{action_id}] error: {exc}")
             action = type("_stub", (), {"action_id": action_id, "cost": ActionCost()})()
         results.append((action, result))

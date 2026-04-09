@@ -86,6 +86,12 @@ def create_psu_module(x_left: float = 0.0) -> SimpleNamespace:
     )
     source.affordances = AffordanceSet(
         static={Affordance.MEASURABLE, Affordance.REPLACEABLE},
+        conditional=[
+            ConditionalAffordance(
+                Affordance.REACHABLE, _when_inverted_only(cube),
+                "reachable when PSU cube is inverted",
+            ),
+        ],
     )
     battery_internal_resistor = Resistor(
         component_id="battery_internal_resistor",
@@ -94,14 +100,12 @@ def create_psu_module(x_left: float = 0.0) -> SimpleNamespace:
         position=Position(x + 0.05, 0.05, 0.05),
         enclosure_id="cube_psu",
     )
-    source.affordances = AffordanceSet(
-        static={Affordance.MEASURABLE},
-        conditional=[
-            ConditionalAffordance(
-                Affordance.REACHABLE, _when_inverted_only(cube),
-                "reachable when PSU cube is inverted",
-            ),
-        ],
+    battery_internal_resistor.affordances = AffordanceSet(
+        static={Affordance.MEASURABLE, Affordance.REPLACEABLE},
+        conditional=[ConditionalAffordance(
+            Affordance.REACHABLE, _when_inverted_only(cube),
+            "reachable when PSU cube is inverted",
+        )],
     )
     green_led = LED(
         component_id="psu_green_led",

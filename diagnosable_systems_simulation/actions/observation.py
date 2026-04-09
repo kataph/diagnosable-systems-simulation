@@ -108,7 +108,7 @@ def observe_component(
         if not component.has_fault():
             record.add("has_observable_internal_fault", False)
         else:
-            record.add("has_observable_internal_fault", str(component._fault_overlay()))
+            record.add("has_observable_internal_fault", str(component._fault_overlay))
 
         # Type-specific visual properties
         from diagnosable_systems_simulation.world.components import (
