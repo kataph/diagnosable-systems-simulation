@@ -205,7 +205,12 @@ class PySpiceBackend(SimulationBackend):
                 self._add_element(circuit, edge, gnd_id, warnings_list, v_supply=0.0)
 
         test_v = 0.001  # 1 mV
-        circuit.V("test", nn(node_a), nn(node_b), test_v)
+        r_lead = 1e-6   # 1 micro-ohm internal probe resistance
+
+        # Connect the test voltage source via a tiny series resistor
+        # to prevent singular matrix errors when probing across a 0V short.
+        circuit.V("test", "test_internal_node", nn(node_b), test_v)
+        circuit.R("test_lead", nn(node_a), "test_internal_node", r_lead)
 
         if logger:
             logger.debug(f"Continuity-test netlist ({node_a} → {node_b}):\n{circuit}")
@@ -221,7 +226,12 @@ class PySpiceBackend(SimulationBackend):
         except (KeyError, Exception):
             return 1e9
 
-        return (test_v / i_test) if i_test > 1e-15 else 1e9
+        if i_test > 1e-15:
+            # Calculate total resistance, then subtract the lead resistance
+            r_total = test_v / i_test
+            return max(0.0, r_total - r_lead)
+        else:
+            return 1e9
 
     # ------------------------------------------------------------------
     # Internal translation helpers

@@ -236,7 +236,7 @@ class Switch(Component):
         component_id: str,
         display_name: str,
         is_closed: bool = True,
-        ron: float = 1e-6,
+        ron: float = 1e-2,
         roff: float = 1e9,
         position: Optional[Position] = None,
         enclosure_id: Optional[str] = None,
@@ -290,7 +290,7 @@ class Cable(Component):
         self,
         component_id: str,
         display_name: str,
-        resistance: float = 0.0,
+        resistance: float = 0.1,
         position: Optional[Position] = None,
         enclosure_id: Optional[str] = None,
     ):

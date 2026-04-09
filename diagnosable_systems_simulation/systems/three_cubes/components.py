@@ -42,6 +42,7 @@ def create_components() -> SimpleNamespace:
         cube_ctrl=ctrl.cube,
         cube_load=load.cube,
         battery=psu.source,
+        battery_internal_resistor=psu.battery_internal_resistor,
         psu_green_led=psu.green_led,
         psu_green_resistor=psu.green_resistor,
         psu_cable_pos=psu.cable_pos,

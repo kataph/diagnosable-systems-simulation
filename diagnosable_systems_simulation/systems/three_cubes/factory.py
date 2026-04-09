@@ -28,13 +28,13 @@ def _build_kg() -> SystemGraph:
 
     # Unpack for readable wiring below
     (cube_psu, cube_ctrl, cube_load,
-     power_source, psu_green_led, psu_green_resistor, psu_cable_pos, psu_cable_neg,
+     power_source, battery_internal_resistor, psu_green_led, psu_green_resistor, psu_cable_pos, psu_cable_neg,
      ctrl_switch, ctrl_red_led, ctrl_red_resistor,
      ctrl_cable_in_pos, ctrl_cable_in_neg, ctrl_cable_out_pos, ctrl_cable_out_neg,
      main_bulb, internal_bulb, load_diode, load_cable_pos, load_cable_neg,
      load_peephole) = (
         c.cube_psu, c.cube_ctrl, c.cube_load,
-        c.battery, c.psu_green_led, c.psu_green_resistor, c.psu_cable_pos, c.psu_cable_neg,
+        c.battery, c.battery_internal_resistor, c.psu_green_led, c.psu_green_resistor, c.psu_cable_pos, c.psu_cable_neg,
         c.ctrl_switch, c.ctrl_red_led, c.ctrl_red_resistor,
         c.ctrl_cable_in_pos, c.ctrl_cable_in_neg, c.ctrl_cable_out_pos, c.ctrl_cable_out_neg,
         c.main_bulb, c.internal_bulb, c.load_diode, c.load_cable_pos, c.load_cable_neg,
@@ -55,7 +55,7 @@ def _build_kg() -> SystemGraph:
 
     # ── PART_OF  (enclosures act as module anchors) ────────────────────
     part_of(power_source, psu_green_led, psu_green_resistor,
-            psu_cable_pos, psu_cable_neg,                       module=cube_psu)
+            psu_cable_pos, psu_cable_neg, battery_internal_resistor, module=cube_psu)
 
     part_of(ctrl_switch, ctrl_red_led, ctrl_red_resistor,
             ctrl_cable_in_pos, ctrl_cable_in_neg,
@@ -65,7 +65,7 @@ def _build_kg() -> SystemGraph:
             load_cable_pos, load_cable_neg,                     module=cube_load)
 
     # ── CONTAINED_IN ──────────────────────────────────────────────────
-    contained_in(power_source, psu_green_led, psu_green_resistor,    enclosure=cube_psu)
+    contained_in(power_source, psu_green_led, psu_green_resistor, battery_internal_resistor, enclosure=cube_psu)
     contained_in(ctrl_red_led, ctrl_red_resistor,                     enclosure=cube_ctrl)
     contained_in(main_bulb, internal_bulb, load_diode, load_peephole, enclosure=cube_load)
 
@@ -93,8 +93,9 @@ def _build_kg() -> SystemGraph:
     wire(power_source.neg,       psu_green_led.cathode,     is_ground=True)
     wire(power_source.neg,       psu_cable_neg.p)
     # psu_pos net
-    wire(power_source.pos,       psu_green_resistor.p)
-    wire(power_source.pos,       psu_cable_pos.p)
+    wire(power_source.pos,       battery_internal_resistor.n)
+    wire(battery_internal_resistor.p,       psu_green_resistor.p)
+    wire(battery_internal_resistor.p,       psu_cable_pos.p)
     # psu_green_mid
     wire(psu_green_resistor.n,   psu_green_led.anode)
     # PSU → Control junction

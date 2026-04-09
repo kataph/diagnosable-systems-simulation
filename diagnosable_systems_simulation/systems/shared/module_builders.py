@@ -80,6 +80,16 @@ def create_psu_module(x_left: float = 0.0) -> SimpleNamespace:
         enclosure_id="cube_psu",
     )
     source.affordances = AffordanceSet(
+        static={Affordance.MEASURABLE, Affordance.REPLACEABLE},
+    )
+    battery_internal_resistor = Resistor(
+        component_id="battery_internal_resistor",
+        display_name="Battery Internal Resistor",
+        resistance=1.0,
+        position=Position(x + 0.05, 0.05, 0.05),
+        enclosure_id="cube_psu",
+    )
+    source.affordances = AffordanceSet(
         static={Affordance.MEASURABLE},
         conditional=[
             ConditionalAffordance(
@@ -136,10 +146,11 @@ def create_psu_module(x_left: float = 0.0) -> SimpleNamespace:
     cube._led_slot_pos = (source, "pos")   # resistor.p connects here
     cube._led_slot_neg = (source, "neg")   # LED.cathode connects here (GND)
 
-    all_comps = [cube, source, green_led, green_resistor, cable_pos, cable_neg]
+    all_comps = [cube, source, green_led, green_resistor, cable_pos, cable_neg, battery_internal_resistor]
     ns = SimpleNamespace(
         cube=cube, source=source, green_led=green_led,
         green_resistor=green_resistor, cable_pos=cable_pos, cable_neg=cable_neg,
+        battery_internal_resistor=battery_internal_resistor,
     )
     ns.ALL = {c.component_id: c for c in all_comps}
     return ns

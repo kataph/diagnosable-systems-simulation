@@ -67,7 +67,7 @@ def _build_kg() -> SystemGraph:
 
     # ── PART_OF ────────────────────────────────────────────────────────
     part_of(psu.source, psu.green_led, psu.green_resistor,
-            psu.cable_pos, psu.cable_neg,                          module=psu.cube)
+            psu.cable_pos, psu.cable_neg, psu.battery_internal_resistor, module=psu.cube)
 
     for ctrl in ctrl_mods:
         part_of(ctrl.switch, ctrl.green_led, ctrl.green_resistor,
@@ -78,7 +78,7 @@ def _build_kg() -> SystemGraph:
             load.diode, load.cable_pos, load.cable_neg,            module=load.cube)
 
     # ── CONTAINED_IN ──────────────────────────────────────────────────
-    contained_in(psu.source, psu.green_led, psu.green_resistor,   enclosure=psu.cube)
+    contained_in(psu.source, psu.green_led, psu.green_resistor, psu.battery_internal_resistor,  enclosure=psu.cube)
 
     for ctrl in ctrl_mods:
         contained_in(ctrl.green_led, ctrl.green_resistor,          enclosure=ctrl.cube)
@@ -97,8 +97,9 @@ def _build_kg() -> SystemGraph:
     wire(psu.source.neg,       psu.green_led.cathode, is_ground=True)
     wire(psu.source.neg,       psu.cable_neg.p)
     # psu_pos net
-    wire(psu.source.pos,       psu.green_resistor.p)
-    wire(psu.source.pos,       psu.cable_pos.p)
+    wire(psu.source.pos,       psu.battery_internal_resistor.n)
+    wire(psu.battery_internal_resistor.p,       psu.green_resistor.p)
+    wire(psu.battery_internal_resistor.p,       psu.cable_pos.p)
     # psu_green_mid
     wire(psu.green_resistor.n, psu.green_led.anode)
 

@@ -18,9 +18,9 @@ from diagnosable_systems_simulation.electrical_simulation.backend.spice import P
 from diagnosable_systems_simulation.systems.base_system import DiagnosableSystem
 from diagnosable_systems_simulation.systems.three_cubes.factory import build_three_cubes_system
 from diagnosable_systems_simulation.systems.ten_cubes.factory import build_ten_cubes_system
-from diagnosable_systems_simulation.actions.diagnostic_actions import CloseSwitch, MeasureVoltage, ObserveComponent, OpenSwitch, TestContinuity, TestControlSubchain
+from diagnosable_systems_simulation.actions.diagnostic_actions import CloseSwitch, InvertEnclosure, MeasureVoltage, ObserveComponent, OpenSwitch, TestContinuity, TestControlSubchain, TestPathContinuity
 from diagnosable_systems_simulation.actions.fault_actions import (
-    DegradeComponent, DisconnectCable, ForceSwitch, ReconnectCable,
+    DegradeComponent, DisconnectCable, ForceSwitch, ReconnectCable, ShortCircuit,
 )
 
 
@@ -392,6 +392,118 @@ class TestScenarioDisconnectionIn10Cubes:
         # assert "lamp is ON" in result.message
         # result = s.apply_action(TestControlSubchain(), {"source":s.component('cube_ctrl1'), "sink":s.component('cube_ctrl1')})
         # assert "lamp is ON" in result.message
+    
+    
+# ---------------------------------------------------------------------------
+# 8. Test scenario 14
+# ---------------------------------------------------------------------------
+
+def _observe_bulb(sim) -> None:
+        obs_result = sim.apply_action(
+        ObserveComponent(),
+        {"subject": sim.component("main_bulb")},
+        )
+        print(f"[observe bulb]    {obs_result}")
+        assert obs_result.success, f"ObserveComponent failed: {obs_result.message}"
+        
+        obs_result = sim.apply_action(
+        MeasureVoltage(),
+        {"subject": sim.component("main_bulb")},
+        )
+        print(f"[measure bulb]    {obs_result}")
+        assert obs_result.success, f"Measure failed: {obs_result.message}"
+
+        print("\n=== observation record ===")
+        if obs_result.observation is not None:
+            for prop in obs_result.observation.properties:
+                unit = f" {prop.unit}" if prop.unit else ""
+                print(f"  {prop.name}: {prop.value}{unit}")
+        else:
+            print("  (no observation record)")
+            
+def _apply(sys: DiagnosableSystem, action, targets: dict) -> None:
+    """Apply a fault action and raise if the system rejects it."""
+    result = sys.apply_action(action, targets)
+    if not result.success:
+        raise RuntimeError(
+            f"Fault injection failed [{action.action_id}]: {result.message}"
+        )
+
+
+class TestShort():
+    """
+    Nomen omen
+    """
+    def _make_stdout_logger(self, name: str = "SpiceRunner") -> logging.Logger:
+        import sys
+        logger = logging.getLogger(name)
+        logger.setLevel(logging.DEBUG)
+        if not logger.handlers:
+            handler = logging.StreamHandler(sys.stdout)
+            handler.setFormatter(logging.Formatter("%(levelname)s | %(name)s | %(message)s"))
+            logger.addHandler(handler)
+        return logger
+    
+    def _short_psu_output_and_discharge(self, sys: DiagnosableSystem) -> None:
+        """
+        Short the PSU output cables together, then mark the battery as discharged.
+
+        The short collapses the psu_pos net to ground; combined with the discharged
+        battery, replacing the battery alone will not restore function.
+        """
+        cable_pos = sys.component("psu_cable_pos")
+        cable_neg = sys.component("psu_cable_neg")
+        psu_pos_node = cable_pos.port("p").node_id   # psu_pos net
+        gnd_node = cable_neg.port("p").node_id       # ground net
+        _apply(sys, ShortCircuit(psu_pos_node, gnd_node, "psu_output_short"), {})
+        _apply(sys, DegradeComponent({"voltage": 0.0}), {"subject": sys.component("battery")})
+    
+    def _short_psu_output(self, sys: DiagnosableSystem) -> None:
+        """
+        Short the PSU output cables together, then mark the battery as discharged.
+
+        The short collapses the psu_pos net to ground; combined with the discharged
+        battery, replacing the battery alone will not restore function.
+        """
+        cable_pos = sys.component("psu_cable_pos")
+        cable_neg = sys.component("psu_cable_neg")
+        psu_pos_node = cable_pos.port("p").node_id   # psu_pos net
+        gnd_node = cable_neg.port("p").node_id       # ground net
+        _apply(sys, ShortCircuit(psu_pos_node, gnd_node, "psu_output_short"), {})
+
+
+
+    def test(self, backend):
+        s = build_ten_cubes_system(backend=backend, extra_tools={'multimeter'})
+        
+        s.add_logger(self._make_stdout_logger())
+        self._short_psu_output(s)
+        
+        
+        _observe_bulb(s)
+        
+        obs_result = s.apply_action(
+        InvertEnclosure(),
+        {"subject":s.component('cube_psu')})
+        
+        print(f"[invert psu cube]    {obs_result}")
+        
+        obs_result = s.apply_action(
+        TestPathContinuity(),
+        {"source":s.component('battery'), "sink":s.component('psu_cable_pos')})
+        
+        print(f"[test continuity]    {obs_result}")
+        assert 'short' in obs_result.message
+        
+        obs_result = s.apply_action(
+        TestPathContinuity(),
+        {"source":s.component('battery'), "sink":s.component('psu_cable_neg')})
+        
+        print(f"[test continuity]    {obs_result}")
+        assert 'short' in obs_result.message
+        
+        
+        
 
 if __name__ == "__main__":
-    TestScenarioDisconnectionIn10Cubes().test(backend=PySpiceBackend())
+    TestShort().test(backend=PySpiceBackend())
