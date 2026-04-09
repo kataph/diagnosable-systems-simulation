@@ -1252,6 +1252,11 @@ class DetachSequenceOfControlModulesAndAttachItToPowerAndLoad(Action):
                 message="One or more subchain boundary ports are floating — cannot rewire.",
             )
 
+        _sub(DisconnectCable(port_names=["p"]), start_in_pos)
+        _sub(DisconnectCable(port_names=["p"]), start_in_neg)
+        _sub(DisconnectCable(port_names=["n"]), end_out_pos)
+        _sub(DisconnectCable(port_names=["n"]), end_out_neg)
+        
         # Left boundary: move PSU n ports to subchain input nodes
         _sub(DisconnectCable(port_names=["n"]), psu_out_pos)
         _sub(DisconnectCable(port_names=["n"]), psu_out_neg)
