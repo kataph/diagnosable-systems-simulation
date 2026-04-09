@@ -5,7 +5,6 @@ from diagnosable_systems_simulation.actions.observation import ObservationRecord
 from diagnosable_systems_simulation.actions.preconditions import (
     AffordanceRequirement, ToolRequirement, PreconditionChecker
 )
-from diagnosable_systems_simulation.systems.base_system import DiagnosableSystem
 from diagnosable_systems_simulation.world.affordances import Affordance
 
 
