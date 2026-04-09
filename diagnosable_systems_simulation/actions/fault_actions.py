@@ -173,8 +173,8 @@ class ShortCircuit(Action):
         
         comp1 = targets["start"]
         comp2 = targets["end"]
-        comp1.apply_fault({"short_circuit_with": comp2.component_id, "short_graph_id": self.short_id})
-        comp2.apply_fault({"short_circuit_with": comp1.component_id, "short_graph_id": self.short_id})
+        comp1.apply_fault({"short_circuit_with": comp2.component_id, "short_graph_id": self.short_id, "short_node_a": self.node_a, "short_node_b": self.node_b})
+        comp2.apply_fault({"short_circuit_with": comp1.component_id, "short_graph_id": self.short_id, "short_node_a": self.node_a, "short_node_b": self.node_b})
         return ActionResult(
             message=f"Applied short fault overlay to components {comp1.display_name!r} and {comp2.display_name!r}.",
         )

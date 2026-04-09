@@ -504,7 +504,8 @@ Critical rule — polarity inversions:
 If a (+)-labeled cable or port is connected to a (−)-labeled cable or port (or vice versa), you MUST
 explicitly state this as a POLARITY INVERSION and name the affected cables. Do not describe such a
 connection as "correct" or "nominal". Example: "POLARITY INVERSION DETECTED: PSU Output Cable (+)
-is connected to Control Input Cable (−), and PSU Output Cable (−) is connected to Control Input Cable (+)."
+is connected to Control Input Cable (−), and PSU Output Cable (−) is connected to Control Input Cable (+). 
+Of course, the presence of a small negative current in one cable, by itself, does not amount to polarity inversion. "
 """,
         user_prompt=raw,
         max_output_tokens=256,

@@ -300,8 +300,29 @@ class DiagnosableSystem:
                     self._graph.reconnect_port(cid, p.name, snap_node)
 
             # --- Fault overlays ------------------------------------------
+            prev_overlay = dict(comp._fault_overlay)
+            snap_overlay = snap["fault_overlays"].get(cid, {})
             comp._fault_overlay.clear()
-            comp._fault_overlay.update(snap["fault_overlays"].get(cid, {}))
+            comp._fault_overlay.update(snap_overlay)
+
+            # Re-insert short-circuit graph element if it was present in the
+            # snapshot but was removed during a repair (apply_repairs removes it
+            # from the graph but it's not tracked in the KG, so restore_snapshot
+            # cannot rely on port_connections to bring it back).
+            prev_short = prev_overlay.get("short_graph_id")
+            snap_short = snap_overlay.get("short_graph_id")
+            if snap_short and snap_short != prev_short:
+                try:
+                    self._graph.remove_component(snap_short)  # remove stale if any
+                except (KeyError, Exception):
+                    pass
+                node_a = snap_overlay.get("short_node_a")
+                node_b = snap_overlay.get("short_node_b")
+                if node_a and node_b:
+                    try:
+                        self._graph.short_nodes(node_a, node_b, snap_short)
+                    except Exception:
+                        pass  # already present
 
             # --- Stateful attributes (is_closed, is_inverted, …) ---------
             for attr, val in snap["component_states"].get(cid, {}).items():
@@ -313,7 +334,7 @@ class DiagnosableSystem:
                 comp._orig_connections = dict(orig)
             elif hasattr(comp, "_orig_connections"):
                 comp._orig_connections = {}
-                
+
             # --- _detached_cable_ports for cable-neightbour -----------------------------
             detached = snap["detached_cable_ports"].get(cid)
             if detached is not None:
@@ -441,38 +462,8 @@ class DiagnosableSystem:
         if fault_snapshot is not None:
             self.restore_snapshot(fault_snapshot, exclude_ids=already)
 
-        # 2. Apply repairs
-        for cid in component_ids:
-            try:
-                comp = self.component(cid)
-            except KeyError:
-                continue
-            if isinstance(comp, Cable):
-                orig = getattr(comp, "_orig_connections", {})
-                for port_name, node_id in orig.items():
-                    port = comp.port(port_name)
-                    if not port.is_connected():
-                        self._graph.reconnect_port(cid, port_name, node_id)
-                    elif port.node_id != node_id:
-                        # Connected to wrong net (crossed-cable fault).
-                        self._graph.disconnect_port(cid, port_name)
-                        self._graph.reconnect_port(cid, port_name, node_id)
-            to_delete=[]
-            if (detached := getattr(comp, "_detached_cable_ports", {})): 
-                for p_port, (cid, c_port, nid) in detached.items():
-                    cable = self.component(cid)
-                    self._graph.reconnect_port(cable.component_id, c_port, nid)
-                    cable.affordances.remove(Affordance.RECONNECTABLE)
-                    to_delete.append(p_port)
-            for p in to_delete:
-                del detached[p]
-
-                if not comp._detached_cable_ports:
-                    comp.affordances.remove(Affordance.RECONNECTABLE)
-                    # Optional: remove the empty attribute to keep objects clean
-                    del comp._detached_cable_ports
-            if comp._fault_overlay:
-                comp._fault_overlay.clear()
+        # 2. Apply repairs (shared logic with apply_repairs, including short removal)
+        self.apply_repairs(component_ids)
 
         # 3. Re-simulate
         result = self.simulate()
