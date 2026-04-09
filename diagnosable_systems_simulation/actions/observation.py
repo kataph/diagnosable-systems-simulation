@@ -105,7 +105,10 @@ def observe_component(
         # here.  Interface faults (e.g. a disconnected cable end) and
         # non-observable internal faults (e.g. a fractured conductor hidden
         # inside cable insulation) are NOT reflected by this property.
-        record.add("has_observable_internal_fault", component.has_fault())
+        if not component.has_fault():
+            record.add("has_observable_internal_fault", False)
+        else:
+            record.add("has_observable_internal_fault", str(component._fault_overlay()))
 
         # Type-specific visual properties
         from diagnosable_systems_simulation.world.components import (
