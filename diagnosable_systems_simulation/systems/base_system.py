@@ -384,6 +384,14 @@ class DiagnosableSystem:
                     # Optional: remove the empty attribute to keep objects clean
                     del comp._detached_cable_ports
             if comp._fault_overlay:
+                # If this component was part of a short-circuit fault, remove the
+                # synthetic graph element inserted by ShortCircuit.execute().
+                short_graph_id = comp._fault_overlay.get("short_graph_id")
+                if short_graph_id is not None:
+                    try:
+                        self._graph.remove_component(short_graph_id)
+                    except (KeyError, Exception):
+                        pass  # already removed by the other cable in the pair
                 comp._fault_overlay.clear()
 
     def test_repair(

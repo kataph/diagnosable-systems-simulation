@@ -405,6 +405,23 @@ def _execute(entries: list[dict], system, allowed_actions: "set[str] | None" = N
                 result = system.apply_action(action, targets)
                 # If the action failed due to a missing affordance, auto-satisfy the
                 # physical prerequisite and retry once.
+                # For source/sink actions (test_path_continuity, etc.) auto-invert any
+                # enclosed component before retrying.
+                if not result.success and not result.success and source_id and sink_id and "REACHABLE" in result.message:
+                    inverted_any = False
+                    for role_id in (source_id, sink_id):
+                        comp_r = system.component(role_id)
+                        enc_id_r = getattr(comp_r, "enclosure_id", None)
+                        if enc_id_r:
+                            enc_r = system.component(enc_id_r)
+                            if enc_r is not None and not getattr(enc_r, "is_inverted", False):
+                                inv_action = InvertEnclosure()
+                                inv_result = system.apply_action(inv_action, {"subject": enc_r})
+                                _logger.info(f"auto-inverted {enc_id_r!r} to satisfy REACHABLE for {role_id!r}")
+                                results.append((inv_action, inv_result))
+                                inverted_any = True
+                    if inverted_any:
+                        result = system.apply_action(action, targets)
                 if not result.success and subject_id:
                     comp = targets.get("subject")
                     enclosure_id = getattr(comp, "enclosure_id", None)
