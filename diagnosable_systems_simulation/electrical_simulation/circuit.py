@@ -141,12 +141,26 @@ class CircuitGraph:
     def remove_component(self, component_id: str) -> CircuitEdge:
         """
         Remove a component from the graph entirely (all ports disconnected).
+        Any nodes that become unreferenced after the removal are also deleted
+        so they do not produce zero rows in the MNA matrix.
         Returns the removed edge.
         """
         edge = self._get_edge(component_id)
+        freed_nodes = set(edge.port_nodes.values())
         for port in edge.component.ports:
             port.node_id = None
         del self._edges[component_id]
+
+        # Collect nodes still in use by the remaining components.
+        still_used = {
+            nid
+            for e in self._edges.values()
+            for nid in e.port_nodes.values()
+        }
+        for node_id in freed_nodes:
+            if node_id not in still_used and node_id in self._nodes:
+                del self._nodes[node_id]
+
         return edge
 
     def short_nodes(self, node_a: str, node_b: str, short_id: str, resistance: float = 1e-6) -> None:
@@ -164,6 +178,53 @@ class CircuitGraph:
             resistance=resistance,
         )
         self.add_component(r, {"p": node_a, "n": node_b})
+
+    def sever_floating_clusters(self) -> int:
+        """
+        Disconnect every component port whose node is unreachable from ground.
+
+        After topology mutations (rewiring, disconnects) some nodes may form
+        isolated clusters with no path to the ground node.  Those clusters
+        cause SPICE to fail with singular-matrix / convergence errors.  This
+        method finds all nodes reachable from ground via BFS and severs any
+        port that references an unreachable node.
+
+        Returns the number of ports severed.
+        """
+        from collections import defaultdict, deque
+
+        ground = self.ground_node()
+        if ground is None:
+            return 0
+
+        # Build adjacency from current port_nodes (undirected)
+        adjacency: dict[str, set[str]] = defaultdict(set)
+        for edge in self._edges.values():
+            nodes = list(edge.port_nodes.values())
+            for i, n1 in enumerate(nodes):
+                for n2 in nodes[i + 1:]:
+                    adjacency[n1].add(n2)
+                    adjacency[n2].add(n1)
+
+        # BFS from ground node
+        visited: set[str] = {ground.node_id}
+        queue: deque[str] = deque([ground.node_id])
+        while queue:
+            nid = queue.popleft()
+            for neighbor in adjacency[nid]:
+                if neighbor not in visited:
+                    visited.add(neighbor)
+                    queue.append(neighbor)
+
+        # Sever every port that sits on an unreachable node
+        severed = 0
+        for edge in list(self._edges.values()):
+            for port, nid in list(edge.port_nodes.items()):
+                if nid not in visited:
+                    self.disconnect_port(edge.component_id, port)
+                    severed += 1
+
+        return severed
 
     def merge_nodes(self, keep_id: str, remove_id: str) -> None:
         """

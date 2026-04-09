@@ -1,5 +1,5 @@
 """
-Simulation tests for StubBackend and PySpiceBackend.
+Simulation tests — PySpiceBackend only.
 
 Covers:
   - Nominal operation (light states, voltages, currents)
@@ -10,45 +10,23 @@ Covers:
 Run:
     python -m pytest tests/test_simulation.py -v
 """
+import logging
 import math
 import pytest
 
-from diagnosable_systems_simulation.electrical_simulation.backend.stub import StubBackend
+from diagnosable_systems_simulation.electrical_simulation.backend.spice import PySpiceBackend
+from diagnosable_systems_simulation.systems.base_system import DiagnosableSystem
 from diagnosable_systems_simulation.systems.three_cubes.factory import build_three_cubes_system
-from diagnosable_systems_simulation.actions.diagnostic_actions import CloseSwitch, MeasureVoltage, OpenSwitch, TestContinuity
+from diagnosable_systems_simulation.systems.ten_cubes.factory import build_ten_cubes_system
+from diagnosable_systems_simulation.actions.diagnostic_actions import CloseSwitch, MeasureVoltage, ObserveComponent, OpenSwitch, TestContinuity, TestControlSubchain
 from diagnosable_systems_simulation.actions.fault_actions import (
     DegradeComponent, DisconnectCable, ForceSwitch, ReconnectCable,
 )
 
-# ---------------------------------------------------------------------------
-# Backend parametrization
-# ---------------------------------------------------------------------------
-
-def _spice_backend():
-    try:
-        from diagnosable_systems_simulation.electrical_simulation.backend.spice import PySpiceBackend
-        return PySpiceBackend()
-    except Exception:
-        return None
-
-
-BACKENDS = {
-    "stub": StubBackend,
-    "spice": _spice_backend,
-}
-
-
-def pytest_generate_tests(metafunc):
-    if "backend_name" in metafunc.fixturenames:
-        metafunc.parametrize("backend_name", list(BACKENDS.keys()), scope="module")
-
 
 @pytest.fixture(scope="module")
-def backend(backend_name):
-    b = BACKENDS[backend_name]()
-    if b is None:
-        pytest.skip(f"{backend_name} backend not available")
-    return b
+def backend():
+    return PySpiceBackend()
 
 
 @pytest.fixture(scope="module")
@@ -332,3 +310,88 @@ class TestContinuityDisconnectedCable:
             "Continuity test on a cable with a floating port must include a "
             "NEARBY ANOMALY warning — technician would physically see the dangling end."
         )
+        
+        
+# ---------------------------------------------------------------------------
+# 8. Test scenario 11
+# ---------------------------------------------------------------------------
+
+class TestScenarioDisconnectionIn10Cubes:
+    """
+    Nomen omen
+    """
+    
+    def _observe_bulb(selfm, sim) -> None:
+        obs_result = sim.apply_action(
+        ObserveComponent(),
+        {"subject": sim.component("main_bulb")},
+        )
+        print(f"[observe bulb]    {obs_result}")
+        assert obs_result.success, f"ObserveComponent failed: {obs_result.message}"
+        
+        obs_result = sim.apply_action(
+        MeasureVoltage(),
+        {"subject": sim.component("main_bulb")},
+        )
+        print(f"[measure bulb]    {obs_result}")
+        assert obs_result.success, f"Measure failed: {obs_result.message}"
+
+        print("\n=== observation record ===")
+        if obs_result.observation is not None:
+            for prop in obs_result.observation.properties:
+                unit = f" {prop.unit}" if prop.unit else ""
+                print(f"  {prop.name}: {prop.value}{unit}")
+        else:
+            print("  (no observation record)")
+            
+    def _make_stdout_logger(self, name: str = "SpiceRunner") -> logging.Logger:
+        import sys
+        logger = logging.getLogger(name)
+        logger.setLevel(logging.DEBUG)
+        if not logger.handlers:
+            handler = logging.StreamHandler(sys.stdout)
+            handler.setFormatter(logging.Formatter("%(levelname)s | %(name)s | %(message)s"))
+            logger.addHandler(handler)
+        return logger
+
+    def test(self, backend):
+        s = build_ten_cubes_system(backend=backend, extra_tools={'multimeter'})
+        s.inject_fault(DisconnectCable(port_names=["n"]), {"subject": s.component("ctrl3_cable_in_pos")})
+        
+        s.add_logger(self._make_stdout_logger())
+        result = s.apply_action(TestControlSubchain(), {"source":s.component('cube_ctrl1'), "sink":s.component('cube_ctrl2')})
+        self._observe_bulb(s)
+        assert "lamp is ON" in result.message
+        
+        s = build_ten_cubes_system(backend=backend, extra_tools={'multimeter'})
+        s.inject_fault(DisconnectCable(port_names=["n"]), {"subject": s.component("ctrl3_cable_in_pos")})
+        
+        for i in range(1, 9):
+            s.remove_component(f"ctrl{i}_green_led")
+            s.remove_component(f"ctrl{i}_green_resistor")
+        
+        s.add_logger(self._make_stdout_logger())
+        result = s.apply_action(TestControlSubchain(), {"source":s.component('cube_ctrl1'), "sink":s.component('cube_ctrl2')})
+        self._observe_bulb(s)
+        assert "lamp is ON" in result.message
+        
+        # s = build_ten_cubes_system(backend=backend, extra_tools={'multimeter'})
+        # s.inject_fault(DisconnectCable(port_names=["n"]), {"subject": s.component("ctrl6_cable_in_pos")})
+        
+        # for i in range(1, 9):
+        #     s.remove_component(f"ctrl{i}_green_led")
+        #     s.remove_component(f"ctrl{i}_green_resistor")
+
+        # result = s.apply_action(TestControlSubchain(), {"source":s.component('cube_ctrl5'), "sink":s.component('cube_ctrl8')})
+        # assert "lamp is OFF" in result.message
+        # result = s.apply_action(TestControlSubchain(), {"source":s.component('cube_ctrl7'), "sink":s.component('cube_ctrl8')})
+        # assert "lamp is ON" in result.message
+        # result = s.apply_action(TestControlSubchain(), {"source":s.component('cube_ctrl6'), "sink":s.component('cube_ctrl6')})
+        # assert "lamp is OFF" in result.message
+        # result = s.apply_action(TestControlSubchain(), {"source":s.component('cube_ctrl1'), "sink":s.component('cube_ctrl5')})
+        # assert "lamp is ON" in result.message
+        # result = s.apply_action(TestControlSubchain(), {"source":s.component('cube_ctrl1'), "sink":s.component('cube_ctrl1')})
+        # assert "lamp is ON" in result.message
+
+if __name__ == "__main__":
+    TestScenarioDisconnectionIn10Cubes().test(backend=PySpiceBackend())

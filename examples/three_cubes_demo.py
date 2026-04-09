@@ -4,9 +4,7 @@ Three cubes lamp — end-to-end usage demo.
 Run from the repo root:
 python -m examples.three_cubes_demo
 """
-from diagnosable_systems_simulation.electrical_simulation.backend.stub import StubBackend
 from diagnosable_systems_simulation.electrical_simulation.backend.spice import PySpiceBackend
-# BACKEND = StubBackend()
 BACKEND = PySpiceBackend()
 
 from diagnosable_systems_simulation.systems.three_cubes.factory import build_three_cubes_system

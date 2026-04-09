@@ -13,9 +13,9 @@ Usage::
 
     from nl_interface.interface import run
     from diagnosable_systems_simulation.systems.three_cubes.factory import build_three_cubes_system
-    from diagnosable_systems_simulation.electrical_simulation.backend.stub import StubBackend
+    from diagnosable_systems_simulation.electrical_simulation.backend.spice import PySpiceBackend
 
-    system = build_three_cubes_system(backend=StubBackend(), extra_tools={"multimeter"})
+    system = build_three_cubes_system(backend=PySpiceBackend(), extra_tools={"multimeter"})
     narrative, cost = run("measure voltage at the main bulb and the control output cables", system)
     print(narrative)
     print(f"cost: {cost.time}s")

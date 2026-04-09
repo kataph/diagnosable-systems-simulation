@@ -1,13 +1,11 @@
 """
 Simulation backends.
 
-``StubBackend`` is always available (pure numpy, no extra dependencies).
 ``PySpiceBackend`` requires ``pip install diagnosable-systems-simulation[spice]``.
 """
-from diagnosable_systems_simulation.electrical_simulation.backend.stub import StubBackend
 from diagnosable_systems_simulation.electrical_simulation.backend.base import SimulationBackend
 
-__all__ = ["SimulationBackend", "StubBackend", "PySpiceBackend"]
+__all__ = ["SimulationBackend", "PySpiceBackend"]
 
 
 def __getattr__(name: str):

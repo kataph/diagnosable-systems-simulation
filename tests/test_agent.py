@@ -4,9 +4,7 @@ Integration tests for the LLM agent (uses real LLM via TextClient / OpenAI backe
 Run:  python -m pytest tests/test_agent.py -v -s
 """
 import pytest
-from diagnosable_systems_simulation.electrical_simulation.backend.stub import StubBackend
 from diagnosable_systems_simulation.electrical_simulation.backend.spice import PySpiceBackend
-# BACKEND = StubBackend()
 BACKEND = PySpiceBackend()
 from diagnosable_systems_simulation.systems.three_cubes.factory import build_three_cubes_system
 from nl_interface.interface import _instantiate, _parse, _verbalize, _REGISTRY

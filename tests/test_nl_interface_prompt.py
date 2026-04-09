@@ -17,7 +17,7 @@ Run:
 """
 import pytest
 
-from diagnosable_systems_simulation.electrical_simulation.backend.stub import StubBackend
+from diagnosable_systems_simulation.electrical_simulation.backend.spice import PySpiceBackend
 from diagnosable_systems_simulation.systems.three_cubes.factory import build_three_cubes_system
 from nl_interface.interface import (
     _PARSE_SYSTEM,
@@ -33,7 +33,7 @@ from nl_interface.interface import (
 
 @pytest.fixture(scope="module")
 def system():
-    s = build_three_cubes_system(backend=StubBackend(), extra_tools={"multimeter"})
+    s = build_three_cubes_system(backend=PySpiceBackend(), extra_tools={"multimeter"})
     s.simulate()
     return s
 

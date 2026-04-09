@@ -1252,11 +1252,11 @@ class DetachSequenceOfControlModulesAndAttachItToPowerAndLoad(Action):
                 message="One or more subchain boundary ports are floating — cannot rewire.",
             )
 
-        _sub(DisconnectCable(port_names=["p"]), start_in_pos)
-        _sub(DisconnectCable(port_names=["p"]), start_in_neg)
-        _sub(DisconnectCable(port_names=["n"]), end_out_pos)
-        _sub(DisconnectCable(port_names=["n"]), end_out_neg)
-        
+        # _sub(DisconnectCable(port_names=["p"]), start_in_pos)
+        # _sub(DisconnectCable(port_names=["p"]), start_in_neg)
+        # _sub(DisconnectCable(port_names=["n"]), end_out_pos)
+        # _sub(DisconnectCable(port_names=["n"]), end_out_neg)
+
         # Left boundary: move PSU n ports to subchain input nodes
         _sub(DisconnectCable(port_names=["n"]), psu_out_pos)
         _sub(DisconnectCable(port_names=["n"]), psu_out_neg)
@@ -1268,6 +1268,15 @@ class DetachSequenceOfControlModulesAndAttachItToPowerAndLoad(Action):
         _sub(DisconnectCable(port_names=["p"]), load_in_neg)
         _sub(ReconnectCable({"p": subchain_out_pos_node}), load_in_pos)
         _sub(ReconnectCable({"p": subchain_out_neg_node}), load_in_neg)
+
+        # ── Sever all floating clusters created by the rewiring ───────────
+        #
+        # After moving the PSU and load cables to the subchain boundaries,
+        # the excluded control modules (and any other components no longer
+        # reachable from ground) form isolated clusters.  SPICE cannot
+        # converge with floating nodes.  sever_floating_clusters() does a
+        # BFS from ground and disconnects every port on an unreachable node.
+        graph.sever_floating_clusters()
 
         # ── Simulate and check load bulbs only ─────────────────────────────
         sim_result = system.simulate()

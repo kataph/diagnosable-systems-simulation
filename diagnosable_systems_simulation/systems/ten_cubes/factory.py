@@ -152,7 +152,7 @@ def build_ten_cubes_system(
     ----------
     backend
         A ``SimulationBackend``.  Defaults to ``PySpiceBackend()``.
-        Pass ``StubBackend()`` for testing without ngspice.
+        Defaults to ``PySpiceBackend()``.
     extra_tools
         Tool identifiers to pre-load into ``WorldContext.tools_in_hand``.
     """
