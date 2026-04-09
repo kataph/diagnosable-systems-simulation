@@ -369,12 +369,15 @@ class DiagnosableSystem:
                         # Connected to wrong net (crossed-cable fault).
                         self._graph.disconnect_port(cid, port_name)
                         self._graph.reconnect_port(cid, port_name, node_id)
+            to_delete = []
             if (detached := getattr(comp, "_detached_cable_ports", {})): 
                 for p_port, (cid, c_port, nid) in detached.items():
                     cable = self.component(cid)
                     self._graph.reconnect_port(cable.component_id, c_port, nid)
                     cable.affordances.remove(Affordance.RECONNECTABLE)
-                    del comp._detached_cable_ports[p_port]
+                    to_delete.append(p_port)
+                for p in to_delete:
+                    del detached[p]
 
                 if not comp._detached_cable_ports:
                     comp.affordances.remove(Affordance.RECONNECTABLE)
@@ -446,12 +449,15 @@ class DiagnosableSystem:
                         # Connected to wrong net (crossed-cable fault).
                         self._graph.disconnect_port(cid, port_name)
                         self._graph.reconnect_port(cid, port_name, node_id)
+            to_delete=[]
             if (detached := getattr(comp, "_detached_cable_ports", {})): 
                 for p_port, (cid, c_port, nid) in detached.items():
                     cable = self.component(cid)
                     self._graph.reconnect_port(cable.component_id, c_port, nid)
                     cable.affordances.remove(Affordance.RECONNECTABLE)
-                    del comp._detached_cable_ports[p_port]
+                    to_delete.append(p_port)
+            for p in to_delete:
+                del detached[p]
 
                 if not comp._detached_cable_ports:
                     comp.affordances.remove(Affordance.RECONNECTABLE)
