@@ -1195,8 +1195,9 @@ class DetachSequenceOfControlModulesAndAttachItToPowerAndLoad(Action):
             self.end_module_id or getattr(targets.get("sink"), "component_id", "")
         )
 
-        def _prefix(cube_id: str) -> str:
-            return cube_id.removeprefix("cube_")
+        def _prefix(module_id: str) -> str:
+            cube_cleaned = module_id.removeprefix("cube_")
+            return cube_cleaned.removeprefix("module_")
 
         start_pfx = _prefix(start_module_id)
         end_pfx   = _prefix(end_module_id)
