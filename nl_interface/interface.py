@@ -353,7 +353,7 @@ def _execute(entries: list[dict], system, allowed_actions: "set[str] | None" = N
                 message=f"Action '{action_id}' is not recognized or supported.",
             )
             action = type("_stub", (), {"action_id": action_id, "cost": ActionCost()})()
-            results.append((action, result))
+            results.append((action, dict(), result))
             continue
 
         if allowed_actions is not None and action_id not in allowed_actions:
@@ -362,7 +362,7 @@ def _execute(entries: list[dict], system, allowed_actions: "set[str] | None" = N
                 message=f"[{action_id}] not permitted in current mode.",
             )
             action = type("_stub", (), {"action_id": action_id, "cost": ActionCost()})()
-            results.append((action, result))
+            results.append((action, dict(), result))
             continue
         try:
             action = _instantiate(entry)
@@ -381,7 +381,7 @@ def _execute(entries: list[dict], system, allowed_actions: "set[str] | None" = N
                     ),
                 )
                 action = type("_stub", (), {"action_id": action_id, "cost": ActionCost(time=10.0)})()
-                results.append((action, result))
+                results.append((action, {"subject":subject_id}, result))
                 continue
             source_id  = entry.get("source")
             sink_id    = entry.get("sink")
@@ -396,7 +396,7 @@ def _execute(entries: list[dict], system, allowed_actions: "set[str] | None" = N
                             message=f"Component '{cid_val}' is not recognized — it is not present in this system.",
                         )
                         action = type("_stub", (), {"action_id": action_id, "cost": ActionCost()})()
-                        results.append((action, result))
+                        results.append((action, {"subject": subject_id, "source": source_id, "sink": sink_id}, result))
                         break
             else:
                 if source_id and sink_id:
@@ -420,9 +420,9 @@ def _execute(entries: list[dict], system, allowed_actions: "set[str] | None" = N
                             enc_r = system.component(enc_id_r)
                             if enc_r is not None and not getattr(enc_r, "is_inverted", False):
                                 inv_action = InvertEnclosure()
-                                inv_result = system.apply_action(inv_action, {"subject": enc_r})
+                                inv_result = system.apply_action(inv_action, targ:={"subject": enc_r})
                                 _logger.info(f"auto-inverted {enc_id_r!r} to satisfy REACHABLE for {role_id!r}")
-                                results.append((inv_action, inv_result))
+                                results.append((inv_action, targ, inv_result))
                                 inverted_any = True
                     if inverted_any:
                         result = system.apply_action(action, targets)
@@ -440,17 +440,17 @@ def _execute(entries: list[dict], system, allowed_actions: "set[str] | None" = N
                         )
                         if inspection_panel is not None:
                             ip_action = OpenInspectionPanel()
-                            ip_result = system.apply_action(ip_action, {"subject": inspection_panel})
+                            ip_result = system.apply_action(ip_action, targ:={"subject": inspection_panel})
                             _logger.info(f"auto-opened inspection panel {inspection_panel.component_id!r} to satisfy REACHABLE for {subject_id!r}")
-                            results.append((ip_action, ip_result))
+                            results.append((ip_action, targ, ip_result))
                             result = system.apply_action(action, targets)
                         else:
                             enclosure = system.component(enclosure_id)
                             if enclosure is not None and not getattr(enclosure, "is_inverted", False):
                                 inv_action = InvertEnclosure()
-                                inv_result = system.apply_action(inv_action, {"subject": enclosure})
+                                inv_result = system.apply_action(inv_action, targ:={"subject": enclosure})
                                 _logger.info(f"auto-inverted {enclosure_id!r} to satisfy REACHABLE for {subject_id!r}")
-                                results.append((inv_action, inv_result))
+                                results.append((inv_action, targ, inv_result))
                                 result = system.apply_action(action, targets)
                     elif enclosure_id and "OBSERVABLE" in result.message:
                         from diagnosable_systems_simulation.world.components import InspectionPanel as _InspectionPanel2, Peephole
@@ -464,9 +464,9 @@ def _execute(entries: list[dict], system, allowed_actions: "set[str] | None" = N
                         )
                         if inspection_panel2 is not None:
                             ip_action2 = OpenInspectionPanel()
-                            ip_result2 = system.apply_action(ip_action2, {"subject": inspection_panel2})
+                            ip_result2 = system.apply_action(ip_action2, targ:={"subject": inspection_panel2})
                             _logger.info(f"auto-opened inspection panel {inspection_panel2.component_id!r} to satisfy OBSERVABLE for {subject_id!r}")
-                            results.append((ip_action2, ip_result2))
+                            results.append((ip_action2, targ, ip_result2))
                             result = system.apply_action(action, targets)
                         else:
                             peephole = next(
@@ -477,36 +477,37 @@ def _execute(entries: list[dict], system, allowed_actions: "set[str] | None" = N
                             )
                             if peephole is not None:
                                 ph_action = OpenPeephole()
-                                ph_result = system.apply_action(ph_action, {"subject": peephole})
+                                ph_result = system.apply_action(ph_action, targ:={"subject": peephole})
                                 _logger.info(f"auto-opened peephole {peephole.component_id!r} to satisfy OBSERVABLE for {subject_id!r}")
-                                results.append((ph_action, ph_result))
+                                results.append((ph_action, targ, ph_result))
                                 result = system.apply_action(action, targets)
                             else:
                                 # No panel or peephole: invert the enclosure (REACHABLE implies OBSERVABLE).
                                 enclosure = system.component(enclosure_id)
                                 if enclosure is not None and not getattr(enclosure, "is_inverted", False):
                                     inv_action = InvertEnclosure()
-                                    inv_result = system.apply_action(inv_action, {"subject": enclosure})
+                                    inv_result = system.apply_action(inv_action, targ:={"subject": enclosure})
                                     _logger.info(f"auto-inverted {enclosure_id!r} to satisfy OBSERVABLE for {subject_id!r}")
-                                    results.append((inv_action, inv_result))
+                                    results.append((inv_action, targ, inv_result))
                                     result = system.apply_action(action, targets)
                 # Propagate cost of auto-access actions taken inside
                 # InspectConnections.execute() (cable port-enclosure opening).
                 if action_id == "inspect_connections" and result.success and result.observation:
                     obs_lookup = {p.name: p.value for p in result.observation.properties}
                     for _panel_cid in filter(None, obs_lookup.get("auto_opened_panel_ids", "").split("; ")):
-                        results.append((OpenInspectionPanel(), ActionResult(message=f"auto-opened panel {_panel_cid} for cable inspection")))
+                        results.append((OpenInspectionPanel(), {"subject":_panel_cid}, ActionResult(message=f"auto-opened panel {_panel_cid} for cable inspection")))
                     for _enc_cid in filter(None, obs_lookup.get("auto_inverted_enclosure_ids", "").split("; ")):
-                        results.append((InvertEnclosure(), ActionResult(message=f"auto-inverted enclosure {_enc_cid} for cable inspection")))
-                results.append((action, result))
+                        results.append((InvertEnclosure(), {"subject":_enc_cid}, ActionResult(message=f"auto-inverted enclosure {_enc_cid} for cable inspection")))
+                results.append((action, targets, result))
                 continue
         except Exception as exc:
             import traceback
             if _logger:
                 _logger.debug(f"[{action_id}] exception:\n{traceback.format_exc()}")
             result = ActionResult(success=False, message=f"[{action_id}] error: {exc}")
+            targets = dict()
             action = type("_stub", (), {"action_id": action_id, "cost": ActionCost()})()
-        results.append((action, result))
+        results.append((action, targets, result))
     return results
 
 
@@ -519,8 +520,11 @@ def _verbalize(results: list[tuple], original_text: str, model: str = MODEL, rep
     if reporting_requirements:
         full_description = original_text + "\n\n" + reporting_requirements + "\n\n"
     lines = [full_description]
-    for action, result in results:
-        lines.append(f"Step description: '{", ".join([str(k)+": "+str(v) for k,v in action.items()])}',\nstep outcome success: {result.success}, step outcome message: {result.message}")
+    for action, targets, result in results:
+        action_id = getattr(action, "action_id", "n.a.")
+        description = getattr(action, "description", "n.a.")
+        targets = targets or 'n.a.'
+        lines.append(f"Step description: ''action_id='{action_id}'; action_description='{description}'; targets='{targets}'\nstep outcome success: {result.success}, step outcome message: {result.message}")
         if result.observation:
             for p in result.observation.properties:
                 unit = f" {p.unit}" if p.unit else ""
@@ -611,12 +615,13 @@ def run(text: str, system: DiagnosableSystem, model: str = MODEL, allowed_action
     results = _execute(entries, system, allowed_actions, _logger)
 
     resources: dict[str, float] = {}
-    for a, _ in results:
+    actions = [a for a, _, _ in results]
+    for a in actions:
         for k, v in a.cost.resources_consumed.items():
             resources[k] = resources.get(k, 0) + v
     total = ActionCost(
-        time=sum(a.cost.time for a, _ in results),
-        equipment=list({e for a, _ in results for e in a.cost.equipment}),
+        time=sum(a.cost.time for a in actions),
+        equipment=list({e for a in actions for e in a.cost.equipment}),
         resources_consumed=resources,
     )
 
