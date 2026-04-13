@@ -483,9 +483,7 @@ def create_load_module(x_left: float = 0.30) -> SimpleNamespace:
         enclosure_id="cube_load",
     )
     internal_bulb._nominal_observation_note = (
-        "DIAGNOSTIC: This lamp is wired in parallel with the main load. "
-        "It lights when the main load carries no current (open-circuit fault). "
-        "A lit lamp indicates a main load failure — treat as ANOMALOUS, not NOMINAL."
+        "This lamp is connected in parallel with the main load and reflects voltage conditions across that branch."
     )
     internal_bulb.affordances = AffordanceSet(
         conditional=[
@@ -811,9 +809,7 @@ def create_ambient_load_module(x_left: float = 0.30) -> SimpleNamespace:
         enclosure_id="cube_load",
     )
     internal_bulb._nominal_observation_note = (
-        "DIAGNOSTIC: This lamp is wired in parallel with the main load. "
-        "It lights when the main load carries no current (open-circuit fault). "
-        "A lit lamp indicates a main load failure — treat as ANOMALOUS, not NOMINAL."
+        "This lamp is connected in parallel with the main load and reflects voltage conditions across that branch."
     )
     internal_bulb.affordances = AffordanceSet(
         conditional=[

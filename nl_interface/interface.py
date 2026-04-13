@@ -528,11 +528,30 @@ def _execute(entries: list[dict], system, allowed_actions: "set[str] | None" = N
 # Step 3: verbalize
 # ---------------------------------------------------------------------------
 
+_verbalize_prompt_free ="""\
+You are going to receive a description of an action executed on a system by an engineer. The action is divided into 1 or more steps, together with the resulting step outcomes.
+You are to process the results and give feedback to engineer by summarizing diagnostic results in 1–3 plain sentences for the engineer.
+In this case, limit yourself strictly to the information in the user prompt — do not add opinions, causes, or extra remarks.
+Inthis case, also observe the following rule:
+Critical rule — polarity inversions:
+If a (+)-labeled cable or port is connected to a (−)-labeled cable or port (or vice versa), you MUST
+explicitly state this as a POLARITY INVERSION and name the affected cables. Do not describe such a
+connection as "correct" or "nominal". Example: "POLARITY INVERSION DETECTED: PSU Output Cable (+)
+is connected to Control Input Cable (−), and PSU Output Cable (−) is connected to Control Input Cable (+). 
+Of course, the presence of a small negative current in one cable, by itself, does not amount to polarity inversion. "
+"""
+_verbalize_prompt_costrained ="""\
+You are going to receive a description of an action executed on a system by an engineer. The action is divided into 1 or more steps, together with the resulting step outcomes.
+You are to process the results and give feedback to engineer by attaining yourself to the reporting requirements below: 
+"""
 def _verbalize(results: list[tuple], original_text: str, model: str = MODEL, reporting_requirements: "str | None" = None, logger: Logger | None = None) -> str:
     full_description = original_text
-    if reporting_requirements:
-        full_description = original_text + "\n\n" + reporting_requirements + "\n\n"
-    lines = [full_description]
+    if not reporting_requirements:
+        system_prompt = _verbalize_prompt_free + "\n\nACTION:\n" + original_text
+    else:
+        system_prompt = _verbalize_prompt_costrained + "\n\nACTION:\n" + original_text + "\n\nREPORTING REQUIREMENTS:\n" + reporting_requirements
+        
+    lines = ["\nSTEPS:\n"]
     for action, targets, result in results:
         action_id = getattr(action, "action_id", "n.a.")
         description = getattr(action, "description", "n.a.")
@@ -547,44 +566,14 @@ def _verbalize(results: list[tuple], original_text: str, model: str = MODEL, rep
         # No executed actions — include the description so the LLM can still
         # honour any reporting requirements (e.g. return a verdict token).
         lines.append(f"action_description: {full_description}, no actions were executed.")
-    raw = "\n".join(lines)
+    user_prompt = "\n".join(lines)
 
-    logger.debug(f"dynamic prompt in verbalize function:\n{raw}")
+    logger.debug(f"dynamic system prompt in verbalize function:\n{system_prompt}")
+    logger.debug(f"dynamic user prompt in verbalize function:\n{user_prompt}")
     return _client().create(
         model=model,
-#         system_prompt="""\
-# You are going to receive a list of actions executed on a system by an engineer, together with the resulting actions.
-# You are to process the results and give feedback to engineer by doing either of two things: 
-
-# (i) if an action is giving you specific instructions on how the outcome should be reported, STRICTLY obey those instructions and don't proceed on (ii) 
-
-# (ii) If no specific action outcome is requested, your default task is to summarize diagnostic results in 1–3 plain sentences for the engineer.
-# In this case, limit yourself strictly to the information in the user prompt — do not add opinions, causes, or extra remarks.
-# Inthis case, also observe the following rule:
-# Critical rule — polarity inversions:
-# If a (+)-labeled cable or port is connected to a (−)-labeled cable or port (or vice versa), you MUST
-# explicitly state this as a POLARITY INVERSION and name the affected cables. Do not describe such a
-# connection as "correct" or "nominal". Example: "POLARITY INVERSION DETECTED: PSU Output Cable (+)
-# is connected to Control Input Cable (−), and PSU Output Cable (−) is connected to Control Input Cable (+). 
-# Of course, the presence of a small negative current in one cable, by itself, does not amount to polarity inversion. "
-# """,
-        system_prompt="""\
-You are going to receive a description of an action executed on a system by an engineer. The action is divided into 1 or more steps, together with the resulting step outcomes.
-You are to process the results and give feedback to engineer by doing either of two things: 
-
-(i) if an action is giving you specific instructions on how the outcome should be reported, STRICTLY obey those instructions and don't proceed on (ii) 
-
-(ii) If no specific action outcome is requested, your default task is to summarize diagnostic results in 1–3 plain sentences for the engineer.
-In this case, limit yourself strictly to the information in the user prompt — do not add opinions, causes, or extra remarks.
-Inthis case, also observe the following rule:
-Critical rule — polarity inversions:
-If a (+)-labeled cable or port is connected to a (−)-labeled cable or port (or vice versa), you MUST
-explicitly state this as a POLARITY INVERSION and name the affected cables. Do not describe such a
-connection as "correct" or "nominal". Example: "POLARITY INVERSION DETECTED: PSU Output Cable (+)
-is connected to Control Input Cable (−), and PSU Output Cable (−) is connected to Control Input Cable (+). 
-Of course, the presence of a small negative current in one cable, by itself, does not amount to polarity inversion. "
-""",
-        user_prompt=raw,
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
         max_output_tokens=256,
     )
 
