@@ -31,10 +31,11 @@ import anthropic, openai
 
 from diagnosable_systems_simulation.actions.base import ActionCost
 from diagnosable_systems_simulation.actions.diagnostic_actions import (
-    AdjustPotentiometer, ClosePeephole, InspectConnections, InvertEnclosure,
-    MeasureCurrent, MeasureVoltage, MoveLED, ObserveComponent, OpenPeephole,
-    ReplaceComponent, CloseSwitch, OpenSwitch, RestoreEnclosure, ShortPorts,
-    TestContinuity, DetachSequenceOfControlModulesAndAttachItToPowerAndLoad,
+    AdjustPotentiometer, CloseInspectionPanel, ClosePeephole, InspectConnections,
+    InvertEnclosure, MeasureCurrent, MeasureVoltage, MoveLED, ObserveComponent,
+    OpenInspectionPanel, OpenPeephole, ReplaceComponent, CloseSwitch, OpenSwitch,
+    RestoreEnclosure, ShortPorts, TestContinuity,
+    DetachSequenceOfControlModulesAndAttachItToPowerAndLoad,
     TestDiode, TestPathContinuity, VerifyRepair,
 )
 from diagnosable_systems_simulation.actions.fault_actions import (
@@ -68,8 +69,10 @@ _REGISTRY: dict[str, tuple] = {
     "inspect_connections": (InspectConnections, {}),
     "invert_enclosure":    (InvertEnclosure,    {}),
     "restore_enclosure":   (RestoreEnclosure,   {}),
-    "open_peephole":       (OpenPeephole,       {}),
-    "close_peephole":      (ClosePeephole,      {}),
+    "open_peephole":           (OpenPeephole,           {}),
+    "close_peephole":          (ClosePeephole,          {}),
+    "open_inspection_panel":   (OpenInspectionPanel,   {}),
+    "close_inspection_panel":  (CloseInspectionPanel,  {}),
     "replace_component":   (ReplaceComponent,   {
         "replacement_part_id": "str — identifier of the replacement part",
         "replacement_cost":    "float (default 1.0)",
@@ -426,13 +429,28 @@ def _execute(entries: list[dict], system, allowed_actions: "set[str] | None" = N
                     comp = targets.get("subject")
                     enclosure_id = getattr(comp, "enclosure_id", None)
                     if enclosure_id and "REACHABLE" in result.message:
-                        enclosure = system.component(enclosure_id)
-                        if enclosure is not None and not getattr(enclosure, "is_inverted", False):
-                            inv_action = InvertEnclosure()
-                            inv_result = system.apply_action(inv_action, {"subject": enclosure})
-                            _logger.info(f"auto-inverted {enclosure_id!r} to satisfy REACHABLE for {subject_id!r}")
-                            results.append((inv_action, inv_result))
+                        from diagnosable_systems_simulation.world.components import InspectionPanel as _InspectionPanel
+                        inspection_panel = next(
+                            (c for c in system.all_components().values()
+                             if isinstance(c, _InspectionPanel)
+                             and getattr(c, "enclosure_id", None) == enclosure_id
+                             and not c.is_open),
+                            None,
+                        )
+                        if inspection_panel is not None:
+                            ip_action = OpenInspectionPanel()
+                            ip_result = system.apply_action(ip_action, {"subject": inspection_panel})
+                            _logger.info(f"auto-opened inspection panel {inspection_panel.component_id!r} to satisfy REACHABLE for {subject_id!r}")
+                            results.append((ip_action, ip_result))
                             result = system.apply_action(action, targets)
+                        else:
+                            enclosure = system.component(enclosure_id)
+                            if enclosure is not None and not getattr(enclosure, "is_inverted", False):
+                                inv_action = InvertEnclosure()
+                                inv_result = system.apply_action(inv_action, {"subject": enclosure})
+                                _logger.info(f"auto-inverted {enclosure_id!r} to satisfy REACHABLE for {subject_id!r}")
+                                results.append((inv_action, inv_result))
+                                result = system.apply_action(action, targets)
                     elif enclosure_id and "OBSERVABLE" in result.message:
                         from diagnosable_systems_simulation.world.components import Peephole
                         peephole = next(
