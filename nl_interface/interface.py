@@ -529,7 +529,7 @@ def _verbalize(results: list[tuple], original_text: str, model: str = MODEL, rep
             for p in result.observation.properties:
                 unit = f" {p.unit}" if p.unit else ""
                 lines.append(f"  {p.name}: {p.value}{unit}")
-        lines.append("\n\n")
+        lines.append("\n")
     if not lines:
         # No executed actions — include the description so the LLM can still
         # honour any reporting requirements (e.g. return a verdict token).
