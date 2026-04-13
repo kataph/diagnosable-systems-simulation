@@ -30,7 +30,8 @@ from diagnosable_systems_simulation.world.affordances import (
     Affordance, AffordanceSet, ConditionalAffordance,
 )
 from diagnosable_systems_simulation.world.components import (
-    Bulb, Cable, Diode, LED, Module, Peephole, PhysicalEnclosure, Resistor, Switch, VoltageSource,
+    Bulb, Cable, Diode, InspectionPanel, LED, LightSensor, Module, Peephole,
+    PhysicalEnclosure, Potentiometer, Resistor, Switch, VoltageSource,
 )
 from diagnosable_systems_simulation.world.spatial import Position
 
@@ -543,6 +544,206 @@ def create_load_module(x_left: float = 0.30) -> SimpleNamespace:
     ns = SimpleNamespace(
         module=module, cube=cube, peephole=peephole, main_bulb=main_bulb, internal_bulb=internal_bulb,
         diode=load_diode, cable_pos=cable_pos, cable_neg=cable_neg,
+    )
+    ns.ALL = {c.component_id: c for c in all_comps}
+    return ns
+
+
+# ---------------------------------------------------------------------------
+# Ambient light sensor control module
+# ---------------------------------------------------------------------------
+
+def create_ambient_ctrl_module(prefix: str = "ctrl") -> SimpleNamespace:
+    """
+    Build the control module for the **ambient light sensor** system.
+
+    Unlike the switch-based 3-cubes module, this one controls the lamp via:
+
+    - An LDR (``ctrl_light_sensor``): high resistance in the dark, low when lit.
+    - A relay (``ctrl_relay``): closed when sensor is dark (normal), opens when
+      the sensor detects light above the threshold.
+    - A bias resistor (``ctrl_sensor_bias``): 10 kΩ in series with the LDR,
+      forming a voltage divider on the ctrl_in_p rail.
+    - Two potentiometers (``ctrl_sensitivity_pot``, ``ctrl_timing_pot``):
+      wired across the supply rail (p→ctrl_in_p, n→ctrl_in_n), wiper left
+      unconnected.  They appear accessible and adjustable but have no effect
+      on the feedback coupling that controls the relay.
+
+    Circuit topology (all nets relative to ``ctrl_cable_in_pos.n``):
+
+        ctrl_in_p net:
+            ctrl_cable_in_pos.n → ctrl_relay.p
+                               → ctrl_sensor_bias.p
+                               → ctrl_sensitivity_pot.p
+                               → ctrl_timing_pot.p
+
+        sensor_mid net:
+            ctrl_sensor_bias.n → ctrl_light_sensor.p
+
+        relay_out net:
+            ctrl_relay.n       → ctrl_cable_out_pos.p
+
+        ctrl_in_n / GND net (= ctrl_cable_in_neg.n):
+            ctrl_cable_in_neg.n → ctrl_cable_out_neg.p
+                                → ctrl_light_sensor.n
+                                → ctrl_sensitivity_pot.n
+                                → ctrl_timing_pot.n
+
+    Affordances
+    -----------
+    ``cube_ctrl``          : REACHABLE + MOVABLE (default for PhysicalEnclosure)
+    ``ctrl_panel``         : REACHABLE + OPENABLE/CLOSEABLE (inspection panel on the side face)
+    ``ctrl_light_sensor``  : OBSERVABLE always; REACHABLE when panel open OR cube rotated
+    ``ctrl_relay``         : OBSERVABLE + REACHABLE when panel open OR cube rotated
+    ``ctrl_sensitivity_pot``: OBSERVABLE + REACHABLE + ADJUSTABLE always (bait)
+    ``ctrl_timing_pot``    : OBSERVABLE + REACHABLE + ADJUSTABLE always (bait)
+    ``ctrl_sensor_bias``   : OBSERVABLE + REACHABLE when panel open OR cube rotated
+
+    The panel enables REACHABLE access for electrical measurements *without*
+    rotating/moving the enclosure.  Opening the panel does NOT break the
+    optical feedback path (the coupling only checks ``cube.is_inverted``).
+
+    Returned namespace attributes
+    ------------------------------
+    module, cube, panel, light_sensor, relay,
+    sensitivity_pot, timing_pot, sensor_bias,
+    cable_in_pos, cable_in_neg, cable_out_pos, cable_out_neg
+    ALL  — ``{component_id: component}`` dict
+    """
+    p = prefix + "_"
+
+    module = Module(
+        component_id=f"control_module_{prefix}",
+        display_name="Control Module",
+        position=Position(0.05, 0.05, 0.20),
+    )
+    cube = PhysicalEnclosure(
+        component_id=f"cube_{prefix}",
+        display_name="Control Cube",
+        position=Position(0.05, 0.05, 0.20),
+    )
+    panel = InspectionPanel(
+        component_id=f"{p}panel",
+        display_name="Control Module Inspection Panel",
+        position=Position(0.00, 0.05, 0.20),
+        enclosure_id=f"cube_{prefix}",
+    )
+    panel._nominal_observation_note = (
+        "This is a removable side panel on the control cube used for electrical inspection. "
+        "Opening it gives probe access to internal components without rotating the cube. "
+        "Rotating the cube (move/rotate enclosure) is a separate physical action."
+    )
+
+    # _when_inverted(cube, peephole=panel) returns True when
+    # cube.is_inverted OR panel.is_open — used for OBSERVABLE/REACHABLE.
+    _panel_or_inverted = _when_inverted(cube, peephole=panel)
+
+    light_sensor = LightSensor(
+        component_id=f"{p}light_sensor",
+        display_name="Ambient Light Sensor",
+        resistance_dark=10_000.0,
+        resistance_lit=100.0,
+        position=Position(0.05, 0.05, 0.20),
+        enclosure_id=f"cube_{prefix}",
+    )
+    light_sensor.affordances = AffordanceSet(
+        static={Affordance.OBSERVABLE, Affordance.MEASURABLE},
+        conditional=[
+            ConditionalAffordance(
+                Affordance.REACHABLE, _panel_or_inverted,
+                "reachable when inspection panel is open or control cube is rotated",
+            ),
+        ],
+    )
+    relay = Switch(
+        component_id=f"{p}relay",
+        display_name="Control Relay",
+        is_closed=True,
+        position=Position(0.05, 0.05, 0.18),
+        enclosure_id=f"cube_{prefix}",
+    )
+    relay.affordances = AffordanceSet(
+        static={Affordance.MEASURABLE},
+        conditional=[
+            ConditionalAffordance(
+                Affordance.OBSERVABLE, _panel_or_inverted,
+                "observable when inspection panel is open or control cube is rotated",
+            ),
+            ConditionalAffordance(
+                Affordance.REACHABLE, _panel_or_inverted,
+                "reachable when inspection panel is open or control cube is rotated",
+            ),
+        ],
+    )
+    sensitivity_pot = Potentiometer(
+        component_id=f"{p}sensitivity_pot",
+        display_name="Sensitivity Potentiometer",
+        total_resistance=50_000.0,
+        wiper_position=0.5,
+        position=Position(0.05, 0.10, 0.20),
+        enclosure_id=f"cube_{prefix}",
+    )
+    sensitivity_pot.affordances = AffordanceSet(
+        static={
+            Affordance.OBSERVABLE, Affordance.REACHABLE,
+            Affordance.MEASURABLE, Affordance.ADJUSTABLE,
+        },
+    )
+    timing_pot = Potentiometer(
+        component_id=f"{p}timing_pot",
+        display_name="Timing Potentiometer",
+        total_resistance=50_000.0,
+        wiper_position=0.5,
+        position=Position(0.05, 0.10, 0.22),
+        enclosure_id=f"cube_{prefix}",
+    )
+    timing_pot.affordances = AffordanceSet(
+        static={
+            Affordance.OBSERVABLE, Affordance.REACHABLE,
+            Affordance.MEASURABLE, Affordance.ADJUSTABLE,
+        },
+    )
+    sensor_bias = Resistor(
+        component_id=f"{p}sensor_bias",
+        display_name="Sensor Bias Resistor",
+        resistance=10_000.0,
+        position=Position(0.05, 0.05, 0.22),
+        enclosure_id=f"cube_{prefix}",
+    )
+    sensor_bias.affordances = AffordanceSet(
+        static={Affordance.MEASURABLE},
+        conditional=[
+            ConditionalAffordance(
+                Affordance.OBSERVABLE, _panel_or_inverted,
+                "observable when inspection panel is open or control cube is rotated",
+            ),
+            ConditionalAffordance(
+                Affordance.REACHABLE, _panel_or_inverted,
+                "reachable when inspection panel is open or control cube is rotated",
+            ),
+        ],
+    )
+    cable_in_pos  = Cable(f"{p}cable_in_pos",  "Control Input Cable (+)",  position=Position(0.00, 0.05, 0.23))
+    cable_in_neg  = Cable(f"{p}cable_in_neg",  "Control Input Cable (−)",  position=Position(0.00, 0.05, 0.17))
+    cable_out_pos = Cable(f"{p}cable_out_pos", "Control Output Cable (+)", position=Position(0.10, 0.05, 0.23))
+    cable_out_neg = Cable(f"{p}cable_out_neg", "Control Output Cable (−)", position=Position(0.10, 0.05, 0.17))
+    cable_in_pos.port_enclosures  = {"n": cube.component_id}
+    cable_in_neg.port_enclosures  = {"n": cube.component_id}
+    cable_out_pos.port_enclosures = {"p": cube.component_id}
+    cable_out_neg.port_enclosures = {"p": cube.component_id}
+
+    all_comps = [
+        module, cube, panel, light_sensor, relay,
+        sensitivity_pot, timing_pot, sensor_bias,
+        cable_in_pos, cable_in_neg, cable_out_pos, cable_out_neg,
+    ]
+    ns = SimpleNamespace(
+        module=module, cube=cube, panel=panel,
+        light_sensor=light_sensor, relay=relay,
+        sensitivity_pot=sensitivity_pot, timing_pot=timing_pot,
+        sensor_bias=sensor_bias,
+        cable_in_pos=cable_in_pos, cable_in_neg=cable_in_neg,
+        cable_out_pos=cable_out_pos, cable_out_neg=cable_out_neg,
     )
     ns.ALL = {c.component_id: c for c in all_comps}
     return ns

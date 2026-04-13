@@ -456,6 +456,69 @@ class ClosePeephole(Action):
         return ActionResult(message=f"Peephole {peephole.display_name!r} is now closed.")
 
 
+class OpenInspectionPanel(Action):
+    """
+    Remove the inspection panel from an enclosure side face.
+
+    Sets ``panel.is_open = True``, making internal components REACHABLE
+    (for measurement and manipulation) without rotating/moving the enclosure.
+    Requires REACHABLE and OPENABLE affordance on the panel.
+
+    targets: {"subject": <InspectionPanel>}
+    """
+
+    action_id = "open_inspection_panel"
+    description = "Remove the inspection panel to access internal components for measurement."
+    cost = ActionCost(time=5.0)
+
+    def check_preconditions(self, targets, context):
+        ok, failures = PreconditionChecker.check_all(
+            [
+                AffordanceRequirement("subject", Affordance.REACHABLE),
+                AffordanceRequirement("subject", Affordance.OPENABLE),
+            ],
+            targets, context,
+        )
+        return ok, "; ".join(failures)
+
+    def execute(self, targets, graph, context, last_result):
+        from diagnosable_systems_simulation.world.components import InspectionPanel
+        panel: InspectionPanel = targets["subject"]
+        panel.is_open = True
+        return ActionResult(message=f"Inspection panel {panel.display_name!r} is now open.")
+
+
+class CloseInspectionPanel(Action):
+    """
+    Replace the inspection panel on an enclosure side face.
+
+    Sets ``panel.is_open = False``.
+    Requires REACHABLE and CLOSEABLE affordance on the panel.
+
+    targets: {"subject": <InspectionPanel>}
+    """
+
+    action_id = "close_inspection_panel"
+    description = "Replace the inspection panel."
+    cost = ActionCost(time=5.0)
+
+    def check_preconditions(self, targets, context):
+        ok, failures = PreconditionChecker.check_all(
+            [
+                AffordanceRequirement("subject", Affordance.REACHABLE),
+                AffordanceRequirement("subject", Affordance.CLOSEABLE),
+            ],
+            targets, context,
+        )
+        return ok, "; ".join(failures)
+
+    def execute(self, targets, graph, context, last_result):
+        from diagnosable_systems_simulation.world.components import InspectionPanel
+        panel: InspectionPanel = targets["subject"]
+        panel.is_open = False
+        return ActionResult(message=f"Inspection panel {panel.display_name!r} is now closed.")
+
+
 class AdjustPotentiometer(Action):
     """
     Adjust the wiper position of a potentiometer.

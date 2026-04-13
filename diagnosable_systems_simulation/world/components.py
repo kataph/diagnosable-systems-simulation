@@ -574,6 +574,68 @@ class Peephole(Component):
         return {}
 
 
+class InspectionPanel(Component):
+    """
+    A removable side panel on an enclosure for electrical inspection.
+
+    Unlike a Peephole (visual-only access), opening an InspectionPanel gives
+    physical REACHABLE access — probe tips can reach internal components for
+    measurement or manipulation.
+
+    Opening the panel does NOT move or rotate the enclosure, so any coupling
+    that depends on ``enclosure.is_inverted`` is unaffected.
+
+    Has no electrical ports.
+
+    State
+    -----
+    is_open
+        True while the panel is removed, giving REACHABLE access to internal
+        components whose affordance condition checks this flag.
+
+    Affordances
+    -----------
+    OBSERVABLE — the panel is always visible from outside.
+    REACHABLE  — the panel is always reachable (to open/close it).
+    OPENABLE   — present when is_open is False.
+    CLOSEABLE  — present when is_open is True.
+    """
+
+    def __init__(
+        self,
+        component_id: str,
+        display_name: str,
+        position: Optional[Position] = None,
+        enclosure_id: Optional[str] = None,
+    ):
+        self.is_open: bool = False
+        super().__init__(
+            component_id=component_id,
+            display_name=display_name,
+            ports=[],
+            affordances=AffordanceSet(
+                static={Affordance.OBSERVABLE, Affordance.REACHABLE},
+                conditional=[
+                    ConditionalAffordance(
+                        Affordance.OPENABLE,
+                        lambda comp, _ctx: not comp.is_open,
+                        "openable when closed",
+                    ),
+                    ConditionalAffordance(
+                        Affordance.CLOSEABLE,
+                        lambda comp, _ctx: comp.is_open,
+                        "closeable when open",
+                    ),
+                ],
+            ),
+            position=position,
+            enclosure_id=enclosure_id,
+        )
+
+    def nominal_parameters(self) -> dict:
+        return {}
+
+
 class Fuse(Component):
     def __init__(
         self,
