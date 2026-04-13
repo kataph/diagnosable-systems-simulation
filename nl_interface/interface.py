@@ -23,7 +23,7 @@ Usage::
 from __future__ import annotations
 
 import json
-import logging
+from logging import Logger
 from typing import Literal
 
 
@@ -34,7 +34,7 @@ from diagnosable_systems_simulation.actions.diagnostic_actions import (
     AdjustPotentiometer, CloseInspectionPanel, ClosePeephole, InspectConnections,
     InvertEnclosure, MeasureCurrent, MeasureVoltage, MoveLED, ObserveComponent,
     OpenInspectionPanel, OpenPeephole, ReplaceComponent, CloseSwitch, OpenSwitch,
-    RestoreEnclosure, ShortPorts, TestContinuity,
+    RestoreEnclosure, RotateEnclosure, ShortPorts, TestContinuity,
     DetachSequenceOfControlModulesAndAttachItToPowerAndLoad,
     TestDiode, TestPathContinuity, VerifyRepair,
 )
@@ -69,6 +69,7 @@ _REGISTRY: dict[str, tuple] = {
     "inspect_connections": (InspectConnections, {}),
     "invert_enclosure":    (InvertEnclosure,    {}),
     "restore_enclosure":   (RestoreEnclosure,   {}),
+    "rotate_enclosure":    (RotateEnclosure,    {}),
     "open_peephole":           (OpenPeephole,           {}),
     "close_peephole":          (ClosePeephole,          {}),
     "open_inspection_panel":   (OpenInspectionPanel,   {}),
@@ -234,7 +235,7 @@ Return format:
 """
 
 
-def _parse(text: str, system: DiagnosableSystem, model: str = MODEL, allowed_actions: "set[str] | None" = None, _logger: logging.Logger | None = None) -> list[dict]:
+def _parse(text: str, system: DiagnosableSystem, model: str = MODEL, allowed_actions: "set[str] | None" = None, _logger: Logger | None = None) -> list[dict]:
     registry = (
         {k: v for k, v in _REGISTRY.items() if k in allowed_actions}
         if allowed_actions is not None
@@ -337,7 +338,7 @@ def _expand_enclosure_targets(entries: list[dict], system) -> list[dict]:
     return expanded
 
 
-def _execute(entries: list[dict], system, allowed_actions: "set[str] | None" = None, _logger: logging.Logger | None = None) -> list[tuple]:
+def _execute(entries: list[dict], system, allowed_actions: "set[str] | None" = None, _logger: Logger | None = None) -> list[tuple]:
     from diagnosable_systems_simulation.actions.base import ActionResult
 
     entries = _expand_enclosure_targets(entries, system)
@@ -489,6 +490,14 @@ def _execute(entries: list[dict], system, allowed_actions: "set[str] | None" = N
                                     _logger.info(f"auto-inverted {enclosure_id!r} to satisfy OBSERVABLE for {subject_id!r}")
                                     results.append((inv_action, inv_result))
                                     result = system.apply_action(action, targets)
+                # Propagate cost of auto-access actions taken inside
+                # InspectConnections.execute() (cable port-enclosure opening).
+                if action_id == "inspect_connections" and result.success and result.observation:
+                    obs_lookup = {p.name: p.value for p in result.observation.properties}
+                    for _panel_cid in filter(None, obs_lookup.get("auto_opened_panel_ids", "").split("; ")):
+                        results.append((OpenInspectionPanel(), ActionResult(message=f"auto-opened panel {_panel_cid} for cable inspection")))
+                    for _enc_cid in filter(None, obs_lookup.get("auto_inverted_enclosure_ids", "").split("; ")):
+                        results.append((InvertEnclosure(), ActionResult(message=f"auto-inverted enclosure {_enc_cid} for cable inspection")))
                 results.append((action, result))
                 continue
         except Exception as exc:
@@ -505,7 +514,7 @@ def _execute(entries: list[dict], system, allowed_actions: "set[str] | None" = N
 # Step 3: verbalize
 # ---------------------------------------------------------------------------
 
-def _verbalize(results: list[tuple], original_text: str, model: str = MODEL, reporting_requirements: "str | None" = None) -> str:
+def _verbalize(results: list[tuple], original_text: str, model: str = MODEL, reporting_requirements: "str | None" = None, logger: Logger | None = None) -> str:
     full_description = original_text
     if reporting_requirements:
         full_description = original_text + "\n\n" + reporting_requirements
@@ -522,6 +531,7 @@ def _verbalize(results: list[tuple], original_text: str, model: str = MODEL, rep
         lines.append(f"action_description: {full_description}, no actions were executed.")
     raw = "\n".join(lines)
 
+    logger.debug(f"dynamic prompt in verbalize function:\n{raw}")
     return _client().create(
         model=model,
         system_prompt="""\
@@ -549,7 +559,7 @@ Of course, the presence of a small negative current in one cable, by itself, doe
 # Public API
 # ---------------------------------------------------------------------------
 
-def run(text: str, system: DiagnosableSystem, model: str = MODEL, allowed_actions: "set[str] | None" = None, _logger: logging.Logger | None = None, reporting_requirements: "str | None" = None) -> tuple[str, ActionCost, list[dict], list[tuple]]:
+def run(text: str, system: DiagnosableSystem, model: str = MODEL, allowed_actions: "set[str] | None" = None, _logger: Logger | None = None, reporting_requirements: "str | None" = None) -> tuple[str, ActionCost, list[dict], list[tuple]]:
     """
     Parse *text*, execute the implied actions on *system*, and return a
     plain-language summary together with the total action cost.
@@ -593,4 +603,4 @@ def run(text: str, system: DiagnosableSystem, model: str = MODEL, allowed_action
         resources_consumed=resources,
     )
 
-    return _verbalize(results=results, original_text=text, model=model, reporting_requirements=reporting_requirements), total, entries, results
+    return _verbalize(results=results, original_text=text, model=model, reporting_requirements=reporting_requirements, logger=_logger), total, entries, results

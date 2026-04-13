@@ -440,7 +440,7 @@ class DiagnosableSystem:
             excluded from the snapshot restore so they remain fixed during
             the test.
         """
-        from diagnosable_systems_simulation.world.components import Bulb, Cable
+        from diagnosable_systems_simulation.world.components import Bulb, Cable, PhysicalEnclosure
 
         fault_snapshot = getattr(self, "_fault_snapshot", None)
         # Only check main load Bulbs — indicator LEDs are accessories and may
@@ -464,6 +464,18 @@ class DiagnosableSystem:
 
         # 2. Apply repairs (shared logic with apply_repairs, including short removal)
         self.apply_repairs(component_ids)
+
+        # 2b. For PhysicalEnclosure components: "repairing" means repositioning
+        # (rotating/moving) so any coupling that checks is_inverted sees the
+        # enclosure as displaced.  restore_snapshot undoes this automatically
+        # since is_inverted is listed in _STATEFUL_ATTRS.
+        for cid in component_ids:
+            try:
+                comp = self._kg.get_entity(cid)
+                if isinstance(comp, PhysicalEnclosure):
+                    comp.is_inverted = True
+            except KeyError:
+                pass
 
         # 3. Re-simulate
         result = self.simulate()

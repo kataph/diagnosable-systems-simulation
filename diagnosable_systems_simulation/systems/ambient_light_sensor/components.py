@@ -17,7 +17,7 @@ from types import SimpleNamespace
 
 from diagnosable_systems_simulation.systems.shared.module_builders import (
     create_ambient_ctrl_module,
-    create_load_module,
+    create_ambient_load_module,
     create_psu_module,
 )
 
@@ -34,7 +34,7 @@ def create_components() -> SimpleNamespace:
     """
     psu  = create_psu_module(x_left=0.00)
     ctrl = create_ambient_ctrl_module(prefix="ctrl")
-    load = create_load_module(x_left=0.00)
+    load = create_ambient_load_module(x_left=0.00)
 
     ns = SimpleNamespace(
         module_psu=psu.module,
@@ -64,7 +64,7 @@ def create_components() -> SimpleNamespace:
         load_diode=load.diode,
         load_cable_pos=load.cable_pos,
         load_cable_neg=load.cable_neg,
-        load_peephole=load.peephole,
+        load_panel=load.panel,
     )
     ns.ALL = {**psu.ALL, **ctrl.ALL, **load.ALL}
     return ns

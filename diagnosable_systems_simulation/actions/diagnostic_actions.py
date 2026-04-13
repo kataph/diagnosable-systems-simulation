@@ -393,6 +393,46 @@ class RestoreEnclosure(Action):
         return ActionResult(message=f"Enclosure {enc.display_name!r} restored to normal orientation.")
 
 
+class RotateEnclosure(Action):
+    """
+    Rotate or move an enclosure to reposition it (e.g. shift a module out of
+    line-of-sight of another component).
+
+    Unlike ``InvertEnclosure`` (which flips a cube for inspection access),
+    this action models a deliberate repositioning — rotating or sliding a
+    module so that its contents no longer face a sensor or another module.
+
+    In the simulation this sets ``is_inverted = True`` on the enclosure,
+    which the ``AmbientFeedbackCoupling`` interprets as the optical path
+    being broken.  The enclosure can be returned to its original position
+    with ``RestoreEnclosure``.
+
+    Requires REACHABLE and MOVABLE affordance on the enclosure.
+
+    targets: {"subject": <PhysicalEnclosure>}
+    """
+
+    action_id = "rotate_enclosure"
+    description = "Rotate or move an enclosure to reposition it (e.g. break a line-of-sight coupling)."
+    cost = ActionCost(time=15.0)
+
+    def check_preconditions(self, targets, context):
+        ok, failures = PreconditionChecker.check_all(
+            [
+                AffordanceRequirement("subject", Affordance.REACHABLE),
+                AffordanceRequirement("subject", Affordance.MOVABLE),
+            ],
+            targets, context,
+        )
+        return ok, "; ".join(failures)
+
+    def execute(self, targets, graph, context, last_result):
+        from diagnosable_systems_simulation.world.components import PhysicalEnclosure
+        enc: PhysicalEnclosure = targets["subject"]
+        enc.is_inverted = True
+        return ActionResult(message=f"Enclosure {enc.display_name!r} has been rotated/moved to a new position.")
+
+
 class OpenPeephole(Action):
     """
     Open a peephole on an enclosure face.
@@ -899,18 +939,50 @@ class InspectConnections(Action):
             action_id=self.action_id,
         )
 
-        # For cables, auto-invert any enclosures containing enclosed ports so that
-        # all port connection statuses can be physically verified.
-        auto_inverted: list[str] = []
+        # For cables, open access to any enclosed ports so all terminals can be
+        # physically verified.  Prefer opening an InspectionPanel over inverting
+        # the whole enclosure (less disruptive, no optical-path side-effects).
+        auto_inverted: list[str] = []       # display names for the message
+        auto_opened: list[str] = []         # display names for the message
+        auto_inv_ids: list[str] = []        # enc component IDs for cost tracking
+        auto_open_ids: list[str] = []       # panel component IDs for cost tracking
         if isinstance(comp, Cable):
             system = context.extra.get("_system")
             if system is not None:
-                for port_name, enc_id in comp.port_enclosures.items():
+                from diagnosable_systems_simulation.world.components import InspectionPanel as _IP
+                seen_enc_ids: set[str] = set()
+                for _port_name, enc_id in comp.port_enclosures.items():
+                    if enc_id in seen_enc_ids:
+                        continue
+                    seen_enc_ids.add(enc_id)
                     try:
                         enc = system.component(enc_id)
-                        if isinstance(enc, PhysicalEnclosure) and not enc.is_inverted:
+                        if not isinstance(enc, PhysicalEnclosure):
+                            continue
+                        if enc.is_inverted:
+                            continue  # already accessible
+                        # Check if an open InspectionPanel already grants access
+                        if any(
+                            isinstance(c, _IP) and getattr(c, "enclosure_id", None) == enc_id and c.is_open
+                            for c in system.all_components().values()
+                        ):
+                            continue  # panel already open
+                        # Prefer opening a closed InspectionPanel
+                        closed_panel = next(
+                            (c for c in system.all_components().values()
+                             if isinstance(c, _IP)
+                             and getattr(c, "enclosure_id", None) == enc_id
+                             and not c.is_open),
+                            None,
+                        )
+                        if closed_panel is not None:
+                            closed_panel.is_open = True
+                            auto_opened.append(enc.display_name)
+                            auto_open_ids.append(closed_panel.component_id)
+                        else:
                             enc.is_inverted = True
                             auto_inverted.append(enc.display_name)
+                            auto_inv_ids.append(enc_id)
                     except (KeyError, AttributeError):
                         pass
 
@@ -933,18 +1005,27 @@ class InspectConnections(Action):
                 lines.append(f"port '{port.name}': {cable_str}")
                 record.add(f"port_{port.name}", cable_str)
 
+        # Store IDs for cost reconstruction in nl_interface.
+        if auto_inv_ids:
+            record.add("auto_inverted_enclosure_ids", "; ".join(auto_inv_ids))
+        if auto_open_ids:
+            record.add("auto_opened_panel_ids", "; ".join(auto_open_ids))
+        # Keep display-name fields for the human-readable message.
         if auto_inverted:
             record.add("auto_inverted_enclosures", "; ".join(auto_inverted))
+        if auto_opened:
+            record.add("auto_opened_enclosures", "; ".join(auto_opened))
 
         summary = "; ".join(lines)
         anomalies = _nearby_anomalies(comp, graph)
         if anomalies:
             record.add("nearby_anomalies", "; ".join(anomalies))
         anomaly_suffix = (" NEARBY ANOMALY: " + "; ".join(anomalies)) if anomalies else ""
-        invert_note = (f" (auto-inverted: {', '.join(auto_inverted)})" if auto_inverted else "")
+        opened_note  = (f" (auto-opened panel: {', '.join(auto_opened)})"  if auto_opened  else "")
+        invert_note  = (f" (auto-inverted: {', '.join(auto_inverted)})"    if auto_inverted else "")
         return ActionResult(
             observation=record,
-            message=f"Connections on {comp.display_name!r}: {summary}.{anomaly_suffix}{invert_note}",
+            message=f"Connections on {comp.display_name!r}: {summary}.{anomaly_suffix}{opened_note}{invert_note}",
         )
 
 

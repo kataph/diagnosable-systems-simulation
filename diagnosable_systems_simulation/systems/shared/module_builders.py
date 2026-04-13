@@ -550,7 +550,7 @@ def create_load_module(x_left: float = 0.30) -> SimpleNamespace:
 
 
 # ---------------------------------------------------------------------------
-# Ambient light sensor control module
+# Ambient light sensor control module and load module
 # ---------------------------------------------------------------------------
 
 def create_ambient_ctrl_module(prefix: str = "ctrl") -> SimpleNamespace:
@@ -744,6 +744,134 @@ def create_ambient_ctrl_module(prefix: str = "ctrl") -> SimpleNamespace:
         sensor_bias=sensor_bias,
         cable_in_pos=cable_in_pos, cable_in_neg=cable_in_neg,
         cable_out_pos=cable_out_pos, cable_out_neg=cable_out_neg,
+    )
+    ns.ALL = {c.component_id: c for c in all_comps}
+    return ns
+
+
+def create_ambient_load_module(x_left: float = 0.30) -> SimpleNamespace:
+    """
+    Build and return a fresh ambient light control Load module.
+
+    It is the same as the 3/10 cubes load module except for the presence 
+    of an access panel instead of a peephole
+
+    Returned namespace attributes
+    ------------------------------
+    cube, main_bulb, internal_bulb, peephole, diode, cable_pos, cable_neg
+    ALL  — ``{component_id: component}`` dict
+    """
+    x = x_left
+
+    module = Module(
+        component_id="module_load",
+        display_name="Load Module",
+        position=Position(x + 0.05, 0.05, 0.05),
+    )
+    cube = PhysicalEnclosure(
+        component_id="cube_load",
+        display_name="Load Cube",
+        position=Position(x + 0.05, 0.05, 0.05),
+    )
+    panel = InspectionPanel(
+        component_id="load_panel",
+        display_name="Load Module Inspection Panel",
+        position=Position(0.00, 0.05, 0.20),
+        enclosure_id="cube_load",
+    )
+    panel._nominal_observation_note = (
+        "This is a removable side panel on the load cube used for electrical inspection. "
+        "Opening it gives probe access to internal components without rotating the cube. "
+        "Rotating the cube (move/rotate enclosure) is a separate physical action."
+    )
+
+    _panel_or_inverted = _when_inverted(cube, peephole=panel)
+
+    def _visible(component, _ctx):
+        """Visible when cube is inverted OR panel is open."""
+        return cube.is_inverted or panel.is_open
+
+    main_bulb = Bulb(
+        component_id="main_bulb",
+        display_name="Main Load (lamp)",
+        resistance=120.0,
+        power_threshold=0.05,
+        position=Position(x + 0.05, 0.05, 0.10),
+        enclosure_id="cube_load",
+    )
+    main_bulb.affordances = AffordanceSet(
+        static={Affordance.REACHABLE, Affordance.MEASURABLE, Affordance.REPLACEABLE},
+    )
+    internal_bulb = Bulb(
+        component_id="internal_bulb",
+        display_name="Internal Indicator Lamp",
+        resistance=500.0,
+        power_threshold=0.01,
+        position=Position(x + 0.05, 0.05, 0.05),
+        enclosure_id="cube_load",
+    )
+    internal_bulb._nominal_observation_note = (
+        "DIAGNOSTIC: This lamp is wired in parallel with the main load. "
+        "It lights when the main load carries no current (open-circuit fault). "
+        "A lit lamp indicates a main load failure — treat as ANOMALOUS, not NOMINAL."
+    )
+    internal_bulb.affordances = AffordanceSet(
+        conditional=[
+            ConditionalAffordance(
+                Affordance.OBSERVABLE, _visible,
+                "observable when load cube is inverted or panel is open",
+            ),
+            ConditionalAffordance(
+                Affordance.REACHABLE, _panel_or_inverted,
+                "reachable when load panel is open or load cube is rotated",
+            ),
+            ConditionalAffordance(
+                Affordance.MEASURABLE, _panel_or_inverted,
+                "measurable when load panel is open or load cube is rotated",
+            ),
+            ConditionalAffordance(
+                Affordance.REPLACEABLE, _panel_or_inverted,
+                "replaceable when load panel is open or load cube is rotated",
+            ),
+        ],
+    )
+    load_diode = Diode(
+        component_id="load_diode",
+        display_name="Load Protection Diode",
+        forward_voltage=0.7,
+        position=Position(x + 0.02, 0.05, 0.05),
+        enclosure_id="cube_load",
+    )
+    load_diode.affordances = AffordanceSet(
+        conditional=[
+            ConditionalAffordance(
+                Affordance.OBSERVABLE, _visible,
+                "observable when load cube is inverted or panel is open",
+            ),
+            ConditionalAffordance(
+                Affordance.REACHABLE, _panel_or_inverted,
+                "reachable when load panel is open or load cube is rotated",
+            ),
+            ConditionalAffordance(
+                Affordance.MEASURABLE, _panel_or_inverted,
+                "measurable when load panel is open or load cube is rotated",
+            ),
+            ConditionalAffordance(
+                Affordance.REPLACEABLE, _panel_or_inverted,
+                "replaceable when load panel is open or load cube is rotated",
+            ),
+        ],
+    )
+    cable_pos = Cable("load_cable_pos", "Load Input Cable (+)", position=Position(x,        0.05, 0.07))
+    cable_neg = Cable("load_cable_neg", "Load Input Cable (−)", position=Position(x,        0.05, 0.03))
+    # n-terminals connect inside the load cube (diode anode and bulb negative rails).
+    cable_pos.port_enclosures = {"n": cube.component_id}
+    cable_neg.port_enclosures = {"n": cube.component_id}
+
+    all_comps = [module, cube, panel, main_bulb, internal_bulb, load_diode, cable_pos, cable_neg]
+    ns = SimpleNamespace(
+        module=module, cube=cube, panel=panel, main_bulb=main_bulb, internal_bulb=internal_bulb,
+        diode=load_diode, cable_pos=cable_pos, cable_neg=cable_neg,
     )
     ns.ALL = {c.component_id: c for c in all_comps}
     return ns

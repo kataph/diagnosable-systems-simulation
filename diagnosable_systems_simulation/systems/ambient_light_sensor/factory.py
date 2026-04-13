@@ -188,7 +188,7 @@ def _build_kg() -> tuple[SystemGraph, PhysicalEnclosure, PhysicalEnclosure]:
         ctrl_sensitivity_pot, ctrl_timing_pot, ctrl_sensor_bias,
         ctrl_cable_in_pos, ctrl_cable_in_neg, ctrl_cable_out_pos, ctrl_cable_out_neg,
         main_bulb, internal_bulb, load_diode, load_cable_pos, load_cable_neg,
-        load_peephole,
+        load_panel,
     ) = (
         c.module_psu, c.module_ctrl, c.module_load,
         c.cube_psu, c.cube_ctrl, c.cube_load,
@@ -198,7 +198,7 @@ def _build_kg() -> tuple[SystemGraph, PhysicalEnclosure, PhysicalEnclosure]:
         c.ctrl_sensitivity_pot, c.ctrl_timing_pot, c.ctrl_sensor_bias,
         c.ctrl_cable_in_pos, c.ctrl_cable_in_neg, c.ctrl_cable_out_pos, c.ctrl_cable_out_neg,
         c.main_bulb, c.internal_bulb, c.load_diode, c.load_cable_pos, c.load_cable_neg,
-        c.load_peephole,
+        c.load_panel,
     )
 
     # ── Component entities ─────────────────────────────────────────────
@@ -227,7 +227,7 @@ def _build_kg() -> tuple[SystemGraph, PhysicalEnclosure, PhysicalEnclosure]:
         module=module_ctrl,
     )
     part_of(
-        main_bulb, internal_bulb, load_diode, load_peephole,
+        main_bulb, internal_bulb, load_diode, load_panel,
         load_cable_pos, load_cable_neg,
         module=module_load,
     )
@@ -243,7 +243,7 @@ def _build_kg() -> tuple[SystemGraph, PhysicalEnclosure, PhysicalEnclosure]:
         enclosure=cube_ctrl,
     )
     contained_in(
-        main_bulb, internal_bulb, load_diode, load_peephole,
+        main_bulb, internal_bulb, load_diode, load_panel,
         enclosure=cube_load,
     )
 
