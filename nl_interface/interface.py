@@ -23,6 +23,7 @@ Usage::
 from __future__ import annotations
 
 import json
+import inspect
 from logging import Logger
 from typing import Literal
 
@@ -43,6 +44,16 @@ from diagnosable_systems_simulation.actions.fault_actions import (
 )
 from diagnosable_systems_simulation.systems.base_system import DiagnosableSystem
 from diagnosable_systems_simulation.world.components import Module
+
+
+import diagnosable_systems_simulation.actions.diagnostic_actions
+_DIAGNOSTIC_ALLOWED_ACTIONS: set[str] = {
+    cls.action_id
+    for name, cls in inspect.getmembers(diagnosable_systems_simulation.actions.diagnostic_actions, inspect.isclass)
+    if hasattr(cls, "action_id") and cls.__module__ == diagnosable_systems_simulation.actions.diagnostic_actions.__name__
+}
+
+
 
 MODEL = "nf-gpt-4o-2024-08-06"
 # MODEL = "gpt-4.1"
@@ -324,13 +335,15 @@ def _expand_enclosure_targets(entries: list[dict], system) -> list[dict]:
                         for part in system.parts_of_module(subject_id)
                         if part.component_id not in removed
                     ]
-                else:
-                    # Expand to components physically inside the enclosure.
+                elif entry.get("action_id") in ["observe_component", "measure_voltage", "measure_current", "replace_component"]:
+                    # Expand to components physically inside the enclosure only for certain action types.
                     sub_entries = [
                         {**entry, "subject": cid}
                         for cid, c in system.all_components().items()
                         if getattr(c, "enclosure_id", None) == subject_id
                     ]
+                else:
+                    sub_entries = []
                 if sub_entries:
                     expanded.extend(sub_entries)
                     continue
@@ -524,7 +537,7 @@ def _verbalize(results: list[tuple], original_text: str, model: str = MODEL, rep
         action_id = getattr(action, "action_id", "n.a.")
         description = getattr(action, "description", "n.a.")
         targets = targets or 'n.a.'
-        lines.append(f"Step description: ''action_id='{action_id}'; action_description='{description}'; targets='{targets}'\nstep outcome success: {result.success}, step outcome message: {result.message}")
+        lines.append(f"Step description: action_id=\"{action_id}\"; action_description=\"{description}\"; targets=\"{targets}\"\nstep outcome success: {result.success}, step outcome message: {result.message}")
         if result.observation:
             for p in result.observation.properties:
                 unit = f" {p.unit}" if p.unit else ""
@@ -580,16 +593,25 @@ Of course, the presence of a small negative current in one cable, by itself, doe
 # Public API
 # ---------------------------------------------------------------------------
 
-def run(text: str, system: DiagnosableSystem, model: str = MODEL, allowed_actions: "set[str] | None" = None, _logger: Logger | None = None, reporting_requirements: "str | None" = None) -> tuple[str, ActionCost, list[dict], list[tuple]]:
+def run(text: str, system: DiagnosableSystem, model: str = MODEL, mode: Literal['verify', 'collect_information'] = 'verify', _logger: Logger | None = None, reporting_requirements: "str | None" = None) -> tuple[str, ActionCost, list[dict], list[tuple]]:
     """
     Parse *text*, execute the implied actions on *system*, and return a
     plain-language summary together with the total action cost.
     Return textual outcome, cost, parsed actions, action results
 
-    allowed_actions: if provided, restricts the action registry to this set of
-        action IDs.  Use this to prevent the NL agent from attempting repair or
+    mode: 'verify', restricts the action registry to a repair action to verify an hypothesis.  
+        'collect_information' prevents the NL agent from attempting repair or
         fault-injection actions during ordinary diagnosis.
     """
+    
+    match mode:
+        case 'verify':
+            allowed_actions = {'verify_repair'}
+        case 'collect_information':
+            allowed_actions = _DIAGNOSTIC_ALLOWED_ACTIONS
+        case _:
+            raise ValueError(f"Got {mode} mode. Should have been Literal['verify', 'collect_information'] type.")
+    
     entries = _parse(text, system, model, allowed_actions, _logger)
 
     if not entries:
@@ -612,7 +634,9 @@ def run(text: str, system: DiagnosableSystem, model: str = MODEL, allowed_action
             narrative = base
         return narrative, ActionCost(), entries, []
 
+    _logger.debug(f"_parse output: {entries}")
     results = _execute(entries, system, allowed_actions, _logger)
+    _logger.debug(f"_execute output: {results}")
 
     resources: dict[str, float] = {}
     actions = [a for a, _, _ in results]

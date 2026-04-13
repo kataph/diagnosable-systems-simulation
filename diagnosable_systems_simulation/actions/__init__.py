@@ -25,6 +25,12 @@ from diagnosable_systems_simulation.actions.diagnostic_actions import (
     OpenSwitch,
     TestContinuity,
     TestDiode,
+    MeasureCurrent,
+    OpenInspectionPanel,
+    CloseInspectionPanel,
+    TestPathContinuity,
+    MoveLED,
+    TestControlSubchain,
 )
 from diagnosable_systems_simulation.actions.fault_actions import (
     BlowFuse,
@@ -42,7 +48,14 @@ __all__ = [
     "AdjustPotentiometer", "ClosePeephole", "InspectConnections",
     "CloseSwitch", "InvertEnclosure", "MeasureVoltage", "ObserveComponent",
     "OpenPeephole", "OpenSwitch", "ReplaceComponent", "RestoreEnclosure",
-    "TestContinuity", "TestDiode",
+    "TestContinuity", "TestDiode",    
+    "MeasureCurrent",
+    "OpenInspectionPanel",
+    "CloseInspectionPanel",
+    "TestPathContinuity",
+    "MoveLED",
+    "TestControlSubchain",
+
     # Fault injection
     "BlowFuse", "DegradeComponent", "DisconnectCable",
     "ForceSwitch", "ReconnectCable", "ShortCircuit",
