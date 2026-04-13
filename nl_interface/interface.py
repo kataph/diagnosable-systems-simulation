@@ -517,14 +517,15 @@ def _execute(entries: list[dict], system, allowed_actions: "set[str] | None" = N
 def _verbalize(results: list[tuple], original_text: str, model: str = MODEL, reporting_requirements: "str | None" = None, logger: Logger | None = None) -> str:
     full_description = original_text
     if reporting_requirements:
-        full_description = original_text + "\n\n" + reporting_requirements
-    lines = []
+        full_description = original_text + "\n\n" + reporting_requirements + "\n\n"
+    lines = [full_description]
     for action, result in results:
-        lines.append(f"action_id: {action.action_id}, action_description: {full_description}, success: {result.success}, message: {result.message}")
+        lines.append(f"Step description: '{", ".join([str(k)+": "+str(v) for k,v in action.items()])}',\nstep outcome success: {result.success}, step outcome message: {result.message}")
         if result.observation:
             for p in result.observation.properties:
                 unit = f" {p.unit}" if p.unit else ""
                 lines.append(f"  {p.name}: {p.value}{unit}")
+        lines.append("\n\n")
     if not lines:
         # No executed actions — include the description so the LLM can still
         # honour any reporting requirements (e.g. return a verdict token).
@@ -534,11 +535,27 @@ def _verbalize(results: list[tuple], original_text: str, model: str = MODEL, rep
     logger.debug(f"dynamic prompt in verbalize function:\n{raw}")
     return _client().create(
         model=model,
+#         system_prompt="""\
+# You are going to receive a list of actions executed on a system by an engineer, together with the resulting actions.
+# You are to process the results and give feedback to engineer by doing either of two things: 
+
+# (i) if an action is giving you specific instructions on how the outcome should be reported, STRICTLY obey those instructions and don't proceed on (ii) 
+
+# (ii) If no specific action outcome is requested, your default task is to summarize diagnostic results in 1–3 plain sentences for the engineer.
+# In this case, limit yourself strictly to the information in the user prompt — do not add opinions, causes, or extra remarks.
+# Inthis case, also observe the following rule:
+# Critical rule — polarity inversions:
+# If a (+)-labeled cable or port is connected to a (−)-labeled cable or port (or vice versa), you MUST
+# explicitly state this as a POLARITY INVERSION and name the affected cables. Do not describe such a
+# connection as "correct" or "nominal". Example: "POLARITY INVERSION DETECTED: PSU Output Cable (+)
+# is connected to Control Input Cable (−), and PSU Output Cable (−) is connected to Control Input Cable (+). 
+# Of course, the presence of a small negative current in one cable, by itself, does not amount to polarity inversion. "
+# """,
         system_prompt="""\
-You are going to receive a list of actions executed on a system by an engineer, together with the resulting actions.
+You are going to receive a description of an action executed on a system by an engineer. The action is divided into 1 or more steps, together with the resulting step outcomes.
 You are to process the results and give feedback to engineer by doing either of two things: 
 
-(i) if an action is giving you specific intructions on how the outcome should be reported, STRICTLY obey those instructions and don't proceed on (ii) 
+(i) if an action is giving you specific instructions on how the outcome should be reported, STRICTLY obey those instructions and don't proceed on (ii) 
 
 (ii) If no specific action outcome is requested, your default task is to summarize diagnostic results in 1–3 plain sentences for the engineer.
 In this case, limit yourself strictly to the information in the user prompt — do not add opinions, causes, or extra remarks.
