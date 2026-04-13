@@ -452,28 +452,43 @@ def _execute(entries: list[dict], system, allowed_actions: "set[str] | None" = N
                                 results.append((inv_action, inv_result))
                                 result = system.apply_action(action, targets)
                     elif enclosure_id and "OBSERVABLE" in result.message:
-                        from diagnosable_systems_simulation.world.components import Peephole
-                        peephole = next(
+                        from diagnosable_systems_simulation.world.components import InspectionPanel as _InspectionPanel2, Peephole
+                        # Prefer InspectionPanel: gives REACHABLE (hence OBSERVABLE) without rotating.
+                        inspection_panel2 = next(
                             (c for c in system.all_components().values()
-                             if isinstance(c, Peephole) and getattr(c, "enclosure_id", None) == enclosure_id
+                             if isinstance(c, _InspectionPanel2)
+                             and getattr(c, "enclosure_id", None) == enclosure_id
                              and not c.is_open),
                             None,
                         )
-                        if peephole is not None:
-                            ph_action = OpenPeephole()
-                            ph_result = system.apply_action(ph_action, {"subject": peephole})
-                            _logger.info(f"auto-opened peephole {peephole.component_id!r} to satisfy OBSERVABLE for {subject_id!r}")
-                            results.append((ph_action, ph_result))
+                        if inspection_panel2 is not None:
+                            ip_action2 = OpenInspectionPanel()
+                            ip_result2 = system.apply_action(ip_action2, {"subject": inspection_panel2})
+                            _logger.info(f"auto-opened inspection panel {inspection_panel2.component_id!r} to satisfy OBSERVABLE for {subject_id!r}")
+                            results.append((ip_action2, ip_result2))
                             result = system.apply_action(action, targets)
                         else:
-                            # No peephole: invert the enclosure (REACHABLE implies OBSERVABLE).
-                            enclosure = system.component(enclosure_id)
-                            if enclosure is not None and not getattr(enclosure, "is_inverted", False):
-                                inv_action = InvertEnclosure()
-                                inv_result = system.apply_action(inv_action, {"subject": enclosure})
-                                _logger.info(f"auto-inverted {enclosure_id!r} to satisfy OBSERVABLE for {subject_id!r}")
-                                results.append((inv_action, inv_result))
+                            peephole = next(
+                                (c for c in system.all_components().values()
+                                 if isinstance(c, Peephole) and getattr(c, "enclosure_id", None) == enclosure_id
+                                 and not c.is_open),
+                                None,
+                            )
+                            if peephole is not None:
+                                ph_action = OpenPeephole()
+                                ph_result = system.apply_action(ph_action, {"subject": peephole})
+                                _logger.info(f"auto-opened peephole {peephole.component_id!r} to satisfy OBSERVABLE for {subject_id!r}")
+                                results.append((ph_action, ph_result))
                                 result = system.apply_action(action, targets)
+                            else:
+                                # No panel or peephole: invert the enclosure (REACHABLE implies OBSERVABLE).
+                                enclosure = system.component(enclosure_id)
+                                if enclosure is not None and not getattr(enclosure, "is_inverted", False):
+                                    inv_action = InvertEnclosure()
+                                    inv_result = system.apply_action(inv_action, {"subject": enclosure})
+                                    _logger.info(f"auto-inverted {enclosure_id!r} to satisfy OBSERVABLE for {subject_id!r}")
+                                    results.append((inv_action, inv_result))
+                                    result = system.apply_action(action, targets)
                 results.append((action, result))
                 continue
         except Exception as exc:
