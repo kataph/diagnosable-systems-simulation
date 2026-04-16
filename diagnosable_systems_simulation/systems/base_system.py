@@ -238,9 +238,13 @@ class DiagnosableSystem:
         """
         Capture the full mutable state of the circuit:
         port connections, fault overlays, component state flags,
-        cable _orig_connections, and static affordances.
+        cable _orig_connections, static affordances, and any
+        circuit-graph-only components (e.g. shorts added by short_ports).
         """
         comps = self.all_components()
+        # IDs present in the circuit graph but not in the KG (ghost components:
+        # shorts, probes added directly by diagnostic actions).
+        circuit_only_ids = set(self._graph._edges) - set(comps)
         return {
             "port_connections": {
                 cid: {p.name: p.node_id for p in c.ports}
@@ -272,6 +276,7 @@ class DiagnosableSystem:
                 cid: set(c.affordances._static)
                 for cid, c in comps.items()
             },
+            "circuit_only_ids": circuit_only_ids,
         }
 
     def restore_snapshot(self, snap: dict, exclude_ids: "set[str] | None" = None) -> None:
@@ -349,6 +354,19 @@ class DiagnosableSystem:
                 comp.affordances.remove(a)
             for a in snap_static - curr_static:
                 comp.affordances.add(a)
+
+        # --- Remove ghost circuit components added after the snapshot --------
+        # These are components in _graph._edges that are not in the KG (e.g.
+        # shorts inserted by short_ports diagnostic actions).  Any ghost that
+        # was not present at snapshot time must be removed so it does not
+        # provide a bypass path in subsequent simulations.
+        snap_ghosts = snap.get("circuit_only_ids", set())
+        current_ghosts = set(self._graph._edges) - set(self.all_components())
+        for ghost_id in current_ghosts - snap_ghosts:
+            try:
+                self._graph.remove_component(ghost_id)
+            except (KeyError, Exception):
+                pass
 
         self.simulate()
 
@@ -482,6 +500,28 @@ class DiagnosableSystem:
 
         # 4. Check whether all expected outputs are lit
         lamp_on = bool(nominal_lit) and nominal_lit.issubset(result.emitting_light)
+
+        # 4b. Bypass guard: if the lamp is on, verify it is controlled by the
+        # switch chain and not by a diagnostic bypass (e.g. a residual short).
+        # Pick one closed, manually-operated Switch, open it, re-simulate, and
+        # confirm the lamp goes off.  Relay-controlled switches are identified by
+        # the coupling re-closing them during simulate() and are skipped.
+        if lamp_on:
+            from diagnosable_systems_simulation.world.components import Switch as _Switch
+            _test_switch = next(
+                (sw for sw in self.all_components().values()
+                 if isinstance(sw, _Switch) and getattr(sw, "is_closed", False)),
+                None,
+            )
+            if _test_switch is not None:
+                _test_switch.is_closed = False
+                _check = self.simulate()
+                _reclosed_by_coupling = getattr(_test_switch, "is_closed", False)
+                if not _reclosed_by_coupling:
+                    _test_switch.is_closed = True  # restore manually
+                if not _reclosed_by_coupling:
+                    # Manually-operated switch: lamp must go off when opened
+                    lamp_on = not nominal_lit.issubset(_check.emitting_light)
 
         # 5. Restore back to fault state — caller decides what to persist
         if fault_snapshot is not None:

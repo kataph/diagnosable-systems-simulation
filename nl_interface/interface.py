@@ -386,15 +386,20 @@ def _execute(entries: list[dict], system, allowed_actions: "set[str] | None" = N
             removed = getattr(system, "_removed_components", {})
             if subject_id and subject_id in removed:
                 display_name = removed[subject_id]
+                # verify_repair on a removed component is a failed attempt:
+                # you cannot repair what has been physically removed.
+                # All other actions (observe, inspect…) succeed vacuously.
+                success = action_id != "verify_repair"
                 result = ActionResult(
-                    success=True,
+                    success=success,
                     message=(
                         f"'{display_name}' is not present — the component has "
-                        f"been physically removed from the system."
+                        f"been physically removed from the system, and it is not "
+                        f"possible to replace it."
                     ),
                 )
-                action = type("_stub", (), {"action_id": action_id, "cost": ActionCost(time=10.0)})()
-                results.append((action, {"subject":subject_id}, result))
+                # Keep the instantiated action so its real cost is recorded.
+                results.append((action, {"subject": subject_id}, result))
                 continue
             source_id  = entry.get("source")
             sink_id    = entry.get("sink")
@@ -568,8 +573,11 @@ def _verbalize(results: list[tuple], original_text: str, model: str = MODEL, rep
         lines.append(f"action_description: {full_description}, no actions were executed.")
     user_prompt = "\n".join(lines)
 
-    logger.debug(f"dynamic system prompt in verbalize function:\n{system_prompt}")
-    logger.debug(f"dynamic user prompt in verbalize function:\n{user_prompt}")
+    if logger:
+        logger.debug(f"dynamic system prompt in verbalize function:\n{system_prompt}")
+        logger.debug(f"dynamic user prompt in verbalize function:\n{user_prompt}")
+    if not logger:
+        raise Exception("Why did this happen?")
     return _client().create(
         model=model,
         system_prompt=system_prompt,
@@ -618,14 +626,17 @@ def run(text: str, system: DiagnosableSystem, model: str = MODEL, mode: Literal[
                 original_text=base,
                 model=model,
                 reporting_requirements=reporting_requirements,
+                logger=_logger
             )
         else:
             narrative = base
         return narrative, ActionCost(), entries, []
 
-    _logger.debug(f"_parse output: {entries}")
+    if _logger:
+        _logger.debug(f"_parse output: {entries}")
     results = _execute(entries, system, allowed_actions, _logger)
-    _logger.debug(f"_execute output: {results}")
+    if _logger:
+        _logger.debug(f"_execute output: {results}")
 
     resources: dict[str, float] = {}
     actions = [a for a, _, _ in results]
