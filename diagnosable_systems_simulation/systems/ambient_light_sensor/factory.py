@@ -159,10 +159,13 @@ class AmbientFeedbackCoupling(PhysicalCoupling):
             changed = True
 
         # 2. Sensor → relay: dark sensor → relay closed; lit sensor → relay open.
-        should_close = (sensor._current_resistance == sensor.resistance_dark)
-        if relay.is_closed != should_close:
-            relay.is_closed = should_close
-            changed = True
+        # Skip if the relay has a fault overlay forcing its state — the overlay
+        # already controls what SPICE sees, so the coupling must not fight it.
+        if "is_closed" not in relay._fault_overlay:
+            should_close = (sensor._current_resistance == sensor.resistance_dark)
+            if relay.is_closed != should_close:
+                relay.is_closed = should_close
+                changed = True
 
         return changed
 

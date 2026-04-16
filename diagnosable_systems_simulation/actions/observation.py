@@ -115,7 +115,9 @@ def observe_component(
             Cable, Switch, LED, Bulb, Fuse, Potentiometer
         )
         if isinstance(component, Switch):
-            record.add("is_closed", component.is_closed)
+            # Use current_parameters() so that fault overlays (e.g. a stuck relay)
+            # are reflected in the observation, matching what SPICE actually simulates.
+            record.add("is_closed", component.current_parameters().get("is_closed", component.is_closed))
         if isinstance(component, LED):
             record.add("color", component.color)
             if result is not None:
