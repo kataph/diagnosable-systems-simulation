@@ -435,13 +435,28 @@ def _execute(entries: list[dict], system, allowed_actions: "set[str] | None" = N
                         comp_r = system.component(role_id)
                         enc_id_r = getattr(comp_r, "enclosure_id", None)
                         if enc_id_r:
-                            enc_r = system.component(enc_id_r)
-                            if enc_r is not None and not getattr(enc_r, "is_inverted", False):
-                                inv_action = InvertEnclosure()
-                                inv_result = system.apply_action(inv_action, targ:={"subject": enc_r})
-                                _logger.info(f"auto-inverted {enc_id_r!r} to satisfy REACHABLE for {role_id!r}")
-                                results.append((inv_action, targ, inv_result))
+                            from diagnosable_systems_simulation.world.components import InspectionPanel as _InspectionPanel
+                            inspection_panel_r = next(
+                                (c for c in system.all_components().values()
+                                 if isinstance(c, _InspectionPanel)
+                                 and getattr(c, "enclosure_id", None) == enc_id_r
+                                 and not c.is_open),
+                                None,
+                            )
+                            if inspection_panel_r is not None:
+                                ip_action_r = OpenInspectionPanel()
+                                ip_result_r = system.apply_action(ip_action_r, targ:={"subject": inspection_panel_r})
+                                _logger.info(f"auto-opened inspection panel {inspection_panel_r.component_id!r} to satisfy REACHABLE for {role_id!r}")
+                                results.append((ip_action_r, targ, ip_result_r))
                                 inverted_any = True
+                            else:
+                                enc_r = system.component(enc_id_r)
+                                if enc_r is not None and not getattr(enc_r, "is_inverted", False):
+                                    inv_action = InvertEnclosure()
+                                    inv_result = system.apply_action(inv_action, targ:={"subject": enc_r})
+                                    _logger.info(f"auto-inverted {enc_id_r!r} to satisfy REACHABLE for {role_id!r}")
+                                    results.append((inv_action, targ, inv_result))
+                                    inverted_any = True
                     if inverted_any:
                         result = system.apply_action(action, targets)
                 if not result.success and subject_id:
