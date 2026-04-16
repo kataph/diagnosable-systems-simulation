@@ -505,5 +505,60 @@ class TestShort():
         
         
 
+class TestRelayBehavior:
+    """
+    Verify that the ambient-light-sensor relay correctly tracks sensor state:
+
+      - Not excited (sensor dark, no feedback): relay closed.
+      - Excited (lamp on → sensor lit, one coupling pass): relay open.
+
+    "Excited" here means the sensor has received enough light to activate the
+    relay coil (normally-closed contacts → open).  The full feedback loop
+    oscillates and never converges; we therefore test the *first coupling pass*
+    in isolation: solve the circuit with the relay closed (lamp on), apply the
+    coupling once, and confirm the relay flipped open.
+    """
+
+    def test_relay_closed_when_not_excited(self, backend):
+        """
+        Default state: als_feedback disabled, sensor dark → relay closed.
+        """
+        from diagnosable_systems_simulation.systems.ambient_light_sensor.factory import build_ambient_light_system
+        s = build_ambient_light_system(backend=backend)
+        # als_feedback=False: sensor is never illuminated → relay stays closed.
+        s.simulate()
+        relay = s.component("ctrl_relay")
+        assert relay.current_parameters()["is_closed"] is True, (
+            "Relay should be CLOSED when sensor is dark (not excited)"
+        )
+
+    def test_relay_opens_when_excited(self, backend):
+        """
+        First coupling pass: lamp on → sensor lit → relay must open.
+
+        The full feedback loop oscillates (lamp→sensor→relay→lamp→…) and never
+        reaches a fixed point.  We therefore drive one coupling pass explicitly:
+        solve the circuit (relay closed → lamp on), apply the coupling once, and
+        assert the relay is now open.  This is exactly what happens in iteration 0
+        of the runner loop and is the behaviour the diagnostic agent relies on.
+        """
+        from diagnosable_systems_simulation.systems.ambient_light_sensor.factory import build_ambient_light_system
+        s = build_ambient_light_system(backend=backend)
+        s.context.extra["als_feedback"] = True
+
+        # One solve with relay initially closed → lamp is on.
+        result = s._runner.backend.solve(s._graph)
+        assert result.is_lit("main_bulb"), "Lamp should be on with relay closed"
+
+        # Apply the coupling once: lamp lit → sensor lit → relay should open.
+        coupling = s._runner.couplings[0]
+        coupling.apply(result, s._graph, s._context)
+
+        relay = s.component("ctrl_relay")
+        assert relay.current_parameters()["is_closed"] is False, (
+            "Relay should be OPEN after sensor is illuminated (excited)"
+        )
+
+
 if __name__ == "__main__":
     TestShort().test(backend=PySpiceBackend())
