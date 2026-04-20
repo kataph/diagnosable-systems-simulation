@@ -1136,7 +1136,7 @@ class MoveLED(Action):
         tgt_neg_node = tgt_slot_neg[0].port(tgt_slot_neg[1]).node_id
 
         # Check if target module has a LED
-        tgt_parts = system.parts_of_module(self.target_module_id)
+        tgt_parts = system.contained_in(self.target_module_id)
         tgt_led = next((c for c in tgt_parts if isinstance(c, LED)), None)
 
         if tgt_led is not None:

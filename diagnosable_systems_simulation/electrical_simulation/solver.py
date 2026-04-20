@@ -167,16 +167,24 @@ class SimulationRunner:
             # (result will be replaced in the next iteration)
 
         # Reached iteration limit without convergence of coupling loop.
+        # Run one final SPICE solve so that the returned node voltages are
+        # consistent with the current component state (which was last updated
+        # by the coupling *after* the previous solve).  Without this extra
+        # solve the voltages belong to a different oscillation phase than the
+        # component flags, producing paradoxical measurements (e.g. relay
+        # reports is_closed=True while node voltage shows only leakage current).
         assert result is not None
-        warnings = result.warnings + (
+        final_result = self.backend.solve(graph, self.logger)
+        base = final_result if final_result.converged else result
+        warnings = base.warnings + (
             f"Physical coupling loop did not stabilise after "
             f"{self.MAX_ITERATIONS} iterations.",
         )
         return SimulationResult(
-            node_voltages=result.node_voltages,
-            branch_currents=result.branch_currents,
-            component_power=result.component_power,
-            emitting_light=result.emitting_light,
+            node_voltages=base.node_voltages,
+            branch_currents=base.branch_currents,
+            component_power=base.component_power,
+            emitting_light=base.emitting_light,
             converged=False,
             warnings=warnings,
         )
