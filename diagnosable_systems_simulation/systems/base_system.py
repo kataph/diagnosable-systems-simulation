@@ -116,6 +116,13 @@ class DiagnosableSystem:
         # Kept separate from the KG so the NL interface can still map to them
         # and return a meaningful "not present" result.
         self._removed_components: dict[str, str] = {}
+        # Nominal emitting-light set — captured on the first simulate() call so
+        # test_repair() knows which Bulbs are expected to be on after a repair.
+        self._nominal_emitting_light: "frozenset[str]" = frozenset()
+        self._nominal_captured: bool = False
+        # Snapshot taken just before the first inject_fault() call; used by
+        # test_repair() to reset to the fault state non-destructively.
+        self._fault_snapshot: "dict | None" = None
 
     # ------------------------------------------------------------------
     # Simulation
@@ -126,11 +133,32 @@ class DiagnosableSystem:
     
     def simulate(self) -> SimulationResult:
         self._last_result = self._runner.run(self._graph, self._context)
+        if not self._nominal_captured:
+            self._nominal_emitting_light = self._last_result.emitting_light
+            self._nominal_captured = True
         return self._last_result
 
     @property
     def last_result(self) -> Optional[SimulationResult]:
         return self._last_result
+
+    def is_system_nominal(self) -> bool:
+        """
+        Return True if the current simulation result shows all nominal Bulbs lit.
+
+        This is the path-(ii) repair check: call it after any mutating action
+        (ReplaceComponent, ReconnectCable, …) to confirm the system is restored.
+        Unlike test_repair(), this does not re-simulate or touch any snapshot —
+        it reads _last_result as-is.
+        """
+        from diagnosable_systems_simulation.world.components import Bulb
+        if self._last_result is None or not self._last_result.converged:
+            return False
+        nominal_bulbs = frozenset(
+            cid for cid in self._nominal_emitting_light
+            if isinstance(self._kg.get_entity(cid), Bulb)
+        )
+        return bool(nominal_bulbs) and nominal_bulbs.issubset(self._last_result.emitting_light)
 
     # ------------------------------------------------------------------
     # Action dispatch
@@ -151,6 +179,10 @@ class DiagnosableSystem:
         return result
 
     def inject_fault(self, fault_action: Action, targets: dict[str, Component]) -> ActionResult:
+        if self._fault_snapshot is None:
+            if self._last_result is None:
+                self.simulate()
+            self._fault_snapshot = self.snapshot()
         return self.apply_action(fault_action, targets)
 
     def remove_component(self, component_id: str) -> None:
@@ -460,7 +492,7 @@ class DiagnosableSystem:
         """
         from diagnosable_systems_simulation.world.components import Bulb, Cable, PhysicalEnclosure
 
-        fault_snapshot = getattr(self, "_fault_snapshot", None)
+        fault_snapshot = self._fault_snapshot
         # Only check main load Bulbs — indicator LEDs are accessories and may
         # have been deliberately removed, so including them would permanently
         # prevent test_repair from ever returning True.
@@ -471,7 +503,7 @@ class DiagnosableSystem:
                 return False  # component was physically removed
 
         nominal_lit: "frozenset[str]" = frozenset(
-            cid for cid in getattr(self, "_nominal_emitting_light", frozenset())
+            cid for cid in self._nominal_emitting_light
             if _is_bulb(cid)
         )
         already = already_repaired_ids or set()
@@ -498,8 +530,14 @@ class DiagnosableSystem:
         # 3. Re-simulate
         result = self.simulate()
 
-        # 4. Check whether all expected outputs are lit
-        lamp_on = bool(nominal_lit) and nominal_lit.issubset(result.emitting_light)
+        # 4. Check whether all expected outputs are lit.
+        # A non-converged result means the circuit is oscillating — the lamp
+        # state is ambiguous and no repair can be confirmed from it.
+        lamp_on = (
+            bool(nominal_lit)
+            and result.converged
+            and nominal_lit.issubset(result.emitting_light)
+        )
 
         # 4b. Bypass guard: if the lamp is on, verify it is controlled by the
         # switch chain and not by a diagnostic bypass (e.g. a residual short).
@@ -520,8 +558,9 @@ class DiagnosableSystem:
                 if not _reclosed_by_coupling:
                     _test_switch.is_closed = True  # restore manually
                 if not _reclosed_by_coupling:
-                    # Manually-operated switch: lamp must go off when opened
-                    lamp_on = not nominal_lit.issubset(_check.emitting_light)
+                    # At least one nominal bulb must go off (multi-chain: other
+                    # chains may stay powered, but this switch must control something)
+                    lamp_on = bool(nominal_lit - _check.emitting_light)
 
         # 5. Restore back to fault state — caller decides what to persist
         if fault_snapshot is not None:

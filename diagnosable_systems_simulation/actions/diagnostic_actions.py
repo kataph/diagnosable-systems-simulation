@@ -320,11 +320,44 @@ class ReplaceComponent(Action):
     def execute(self, targets, graph, context, last_result):
         comp = targets["subject"]
         comp.clear_fault()
-        from diagnosable_systems_simulation.world.components import Fuse, Switch
+        from diagnosable_systems_simulation.world.components import Cable, Fuse, Switch
         if isinstance(comp, Fuse):
             comp.is_blown = False
         if isinstance(comp, Switch):
             comp.is_closed = True
+        if isinstance(comp, Cable):
+            # A replacement cable arrives pre-connected: restore any floating ports
+            # to their original nodes and clean up the RECONNECTABLE affordance.
+            orig = getattr(comp, "_orig_connections", {})
+            for port_name, node_id in orig.items():
+                port = comp.port(port_name)
+                if not port.is_connected():
+                    graph.reconnect_port(comp.component_id, port_name, node_id)
+                elif port.node_id != node_id:
+                    graph.disconnect_port(comp.component_id, port_name)
+                    graph.reconnect_port(comp.component_id, port_name, node_id)
+            # Clean up neighbour markers left by DisconnectCable
+            for port_name, node_id in orig.items():
+                for edge in graph.get_netlist():
+                    if edge.component_id == comp.component_id:
+                        continue
+                    for peer_port_name, peer_node_id in edge.port_nodes.items():
+                        if peer_node_id != node_id:
+                            continue
+                        peer = edge.component
+                        if not hasattr(peer, "_detached_cable_ports"):
+                            continue
+                        to_delete = [
+                            pp for pp, (cid, cp, nid) in peer._detached_cable_ports.items()
+                            if cid == comp.component_id and nid == node_id
+                        ]
+                        for pp in to_delete:
+                            del peer._detached_cable_ports[pp]
+                        if not peer._detached_cable_ports:
+                            peer.affordances.remove(Affordance.RECONNECTABLE)
+                            del peer._detached_cable_ports
+            comp.affordances.remove(Affordance.RECONNECTABLE)
+            comp.affordances.add(Affordance.DETACHABLE)
         return ActionResult(
             message=(
                 f"Replaced {comp.display_name!r} with "

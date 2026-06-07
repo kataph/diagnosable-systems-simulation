@@ -18,7 +18,7 @@ from diagnosable_systems_simulation.electrical_simulation.backend.spice import P
 from diagnosable_systems_simulation.systems.base_system import DiagnosableSystem
 from diagnosable_systems_simulation.systems.three_cubes.factory import build_three_cubes_system
 from diagnosable_systems_simulation.systems.ten_cubes.factory import build_ten_cubes_system
-from diagnosable_systems_simulation.actions.diagnostic_actions import CloseSwitch, InvertEnclosure, MeasureVoltage, ObserveComponent, OpenSwitch, TestContinuity, TestControlSubchain, TestPathContinuity
+from diagnosable_systems_simulation.actions.diagnostic_actions import CloseSwitch, InvertEnclosure, MeasureVoltage, ObserveComponent, OpenSwitch, ReplaceComponent, TestContinuity, TestControlSubchain, TestPathContinuity
 from diagnosable_systems_simulation.actions.fault_actions import (
     DegradeComponent, DisconnectCable, ForceSwitch, ReconnectCable, ShortCircuit,
 )
@@ -558,6 +558,411 @@ class TestRelayBehavior:
         assert relay.current_parameters()["is_closed"] is False, (
             "Relay should be OPEN after sensor is illuminated (excited)"
         )
+
+
+# ---------------------------------------------------------------------------
+# Current sensor system tests
+# ---------------------------------------------------------------------------
+
+from diagnosable_systems_simulation.systems.current_sensor.factory import build_current_sensor_system
+
+
+def _fresh_cs(backend):
+    s = build_current_sensor_system(backend=backend, extra_tools={"multimeter"})
+    s.simulate()
+    return s
+
+
+class TestCurrentSensorNominal:
+    """Nominal state: relay closed, all bulbs and indicator LED lit."""
+
+    def test_converges(self, backend):
+        s = _fresh_cs(backend)
+        assert s.last_result.converged
+
+    def test_no_warnings(self, backend):
+        s = _fresh_cs(backend)
+        assert s.last_result.warnings == ()
+
+    def test_main_bulb_lit(self, backend):
+        s = _fresh_cs(backend)
+        assert s.last_result.is_lit("main_bulb")
+
+    def test_internal_bulb_lit(self, backend):
+        s = _fresh_cs(backend)
+        assert s.last_result.is_lit("internal_bulb")
+
+    def test_psu_green_led_lit(self, backend):
+        s = _fresh_cs(backend)
+        assert s.last_result.is_lit("psu_green_led")
+
+    def test_ctrl_green_led_lit(self, backend):
+        # Indicator LED is on when relay is closed and current flows
+        s = _fresh_cs(backend)
+        assert s.last_result.is_lit("ctrl_green_led")
+
+    def test_relay_closed_nominally(self, backend):
+        s = _fresh_cs(backend)
+        relay = s.component("ctrl_relay")
+        assert relay.current_parameters()["is_closed"] is True
+
+
+class TestCurrentSensorFaults:
+
+    def test_relay_stuck_open_kills_lamp(self, backend):
+        """Stuck-open relay: 0V return path broken → lamp off, PSU LED still on."""
+        s = _fresh_cs(backend)
+        s.inject_fault(ForceSwitch(is_closed=False), {"subject": s.component("ctrl_relay")})
+        r = s.last_result
+        assert not r.is_lit("main_bulb")
+        assert not r.is_lit("internal_bulb")
+        assert r.is_lit("psu_green_led")
+
+    def test_relay_stuck_open_repair(self, backend):
+        """Repair stuck-open relay by removing the fault overlay."""
+        s = _fresh_cs(backend)
+        s.inject_fault(ForceSwitch(is_closed=False), {"subject": s.component("ctrl_relay")})
+        assert not s.last_result.is_lit("main_bulb")
+        # Repair: clear fault overlay and re-simulate
+        s.component("ctrl_relay")._fault_overlay.clear()
+        s.simulate()
+        assert s.last_result.is_lit("main_bulb")
+
+    def test_burned_bulb_kills_main_lamp(self, backend):
+        """Burned main bulb (open circuit): lamp off, PSU and ctrl LEDs still on."""
+        s = _fresh_cs(backend)
+        s.inject_fault(DegradeComponent({"resistance": 1e9}), {"subject": s.component("main_bulb")})
+        r = s.last_result
+        assert not r.is_lit("main_bulb")
+        assert r.is_lit("psu_green_led")
+
+    def test_burned_bulb_repair(self, backend):
+        """Repair burned bulb by restoring nominal resistance."""
+        s = _fresh_cs(backend)
+        s.inject_fault(DegradeComponent({"resistance": 1e9}), {"subject": s.component("main_bulb")})
+        assert not s.last_result.is_lit("main_bulb")
+        s.component("main_bulb")._fault_overlay.clear()
+        s.simulate()
+        assert s.last_result.is_lit("main_bulb")
+
+    def test_depleted_battery_kills_everything(self, backend):
+        """Depleted battery: all lights off."""
+        s = _fresh_cs(backend)
+        s.inject_fault(DegradeComponent({"voltage": 0.0}), {"subject": s.component("battery")})
+        r = s.last_result
+        assert not r.is_lit("main_bulb")
+        assert not r.is_lit("psu_green_led")
+        assert not r.is_lit("ctrl_green_led")
+
+    def test_depleted_battery_repair(self, backend):
+        """Repair depleted battery."""
+        s = _fresh_cs(backend)
+        s.inject_fault(DegradeComponent({"voltage": 0.0}), {"subject": s.component("battery")})
+        assert not s.last_result.is_lit("main_bulb")
+        s.component("battery")._fault_overlay.clear()
+        s.simulate()
+        assert s.last_result.is_lit("main_bulb")
+
+    def test_lamp_short_opens_relay(self, backend):
+        """
+        Short-circuit across the load (very low resistance) → overcurrent →
+        relay opens → lamp goes off and circuit is non-converging (oscillating
+        protection loop) or relay stably opens.
+
+        Either converged=False (oscillation) or lamp off with relay open
+        both represent correct overcurrent-protection behaviour.
+        """
+        s = _fresh_cs(backend)
+        s.inject_fault(DegradeComponent({"resistance": 0.5}), {"subject": s.component("main_bulb")})
+        r = s.last_result
+        relay = s.component("ctrl_relay")
+        relay_open = not relay.current_parameters()["is_closed"]
+        lamp_off = not r.is_lit("main_bulb")
+        # Either the relay tripped (opened) or the loop didn't converge — both correct
+        assert relay_open or not r.converged, (
+            f"Overcurrent should open relay or cause non-convergence; "
+            f"relay_open={relay_open}, converged={r.converged}"
+        )
+        assert lamp_off or not r.converged
+
+    def test_psu_cable_detached_kills_lamp(self, backend):
+        """Detaching the PSU output positive cable cuts power to everything downstream."""
+        s = _fresh_cs(backend)
+        s.inject_fault(DisconnectCable(port_names=["n"]), {"subject": s.component("psu_cable_pos")})
+        assert not s.last_result.is_lit("main_bulb")
+        assert not s.last_result.is_lit("ctrl_green_led")
+
+    def test_psu_cable_detached_repair(self, backend):
+        """Reconnecting the PSU positive cable restores the lamp."""
+        s = _fresh_cs(backend)
+        node = s.graph.nodes_of("psu_cable_pos")["n"]
+        s.inject_fault(DisconnectCable(port_names=["n"]), {"subject": s.component("psu_cable_pos")})
+        assert not s.last_result.is_lit("main_bulb")
+        s.inject_fault(ReconnectCable(connections={"n": node}), {"subject": s.component("psu_cable_pos")})
+        assert s.last_result.is_lit("main_bulb")
+
+
+# ---------------------------------------------------------------------------
+# Asymmetric chains system tests
+# ---------------------------------------------------------------------------
+
+from diagnosable_systems_simulation.systems.asymmetric_chains.factory import build_asymmetric_chains_system
+
+
+def _fresh_ac(backend):
+    s = build_asymmetric_chains_system(backend=backend, extra_tools={"multimeter"})
+    s.simulate()
+    return s
+
+
+class TestAsymmetricChainsNominal:
+    """Nominal: both loads lit, all five indicator LEDs lit."""
+
+    def test_converges(self, backend):
+        s = _fresh_ac(backend)
+        assert s.last_result.converged
+
+    def test_no_warnings(self, backend):
+        s = _fresh_ac(backend)
+        assert s.last_result.warnings == ()
+
+    def test_load1_main_bulb_lit(self, backend):
+        s = _fresh_ac(backend)
+        assert s.last_result.is_lit("load1_main_bulb")
+
+    def test_load2_main_bulb_lit(self, backend):
+        s = _fresh_ac(backend)
+        assert s.last_result.is_lit("load2_main_bulb")
+
+    def test_psu1_green_led_lit(self, backend):
+        s = _fresh_ac(backend)
+        assert s.last_result.is_lit("psu1_psu_green_led")
+
+    def test_psu2_green_led_lit(self, backend):
+        s = _fresh_ac(backend)
+        assert s.last_result.is_lit("psu2_psu_green_led")
+
+    def test_ctrl1_green_led_lit(self, backend):
+        s = _fresh_ac(backend)
+        assert s.last_result.is_lit("ctrl1_green_led")
+
+    def test_ctrl2_green_led_lit(self, backend):
+        s = _fresh_ac(backend)
+        assert s.last_result.is_lit("ctrl2_green_led")
+
+    def test_ctrl3_green_led_lit(self, backend):
+        s = _fresh_ac(backend)
+        assert s.last_result.is_lit("ctrl3_green_led")
+
+
+class TestAsymmetricChainsFaults:
+
+    def test_ctrl1_switch_open_kills_load1_only(self, backend):
+        """
+        Opening CTRL1 switch breaks the only path to LOAD1.
+        LOAD2 still receives power via PSU2→CTRL2→CTRL3→LOAD2,
+        so it stays lit.
+        """
+        s = _fresh_ac(backend)
+        s.apply_action(OpenSwitch(), {"subject": s.component("ctrl1_switch")})
+        r = s.last_result
+        assert not r.is_lit("load1_main_bulb"), "LOAD1 must be OFF when CTRL1 switch opens"
+        assert r.is_lit("load2_main_bulb"), "LOAD2 must stay ON (independent chain via CTRL2/3)"
+
+    def test_ctrl1_switch_open_repair(self, backend):
+        s = _fresh_ac(backend)
+        s.apply_action(OpenSwitch(), {"subject": s.component("ctrl1_switch")})
+        assert not s.last_result.is_lit("load1_main_bulb")
+        s.apply_action(CloseSwitch(), {"subject": s.component("ctrl1_switch")})
+        assert s.last_result.is_lit("load1_main_bulb")
+
+    def test_ctrl3_switch_open_kills_load2_only(self, backend):
+        """
+        Opening CTRL3 switch breaks the path to LOAD2.
+        LOAD1 is not affected (receives power via PSU1→CTRL1→LOAD1).
+        """
+        s = _fresh_ac(backend)
+        s.apply_action(OpenSwitch(), {"subject": s.component("ctrl3_switch")})
+        r = s.last_result
+        assert not r.is_lit("load2_main_bulb"), "LOAD2 must be OFF when CTRL3 switch opens"
+        assert r.is_lit("load1_main_bulb"), "LOAD1 must stay ON"
+
+    def test_ctrl3_switch_open_repair(self, backend):
+        s = _fresh_ac(backend)
+        s.apply_action(OpenSwitch(), {"subject": s.component("ctrl3_switch")})
+        assert not s.last_result.is_lit("load2_main_bulb")
+        s.apply_action(CloseSwitch(), {"subject": s.component("ctrl3_switch")})
+        assert s.last_result.is_lit("load2_main_bulb")
+
+    def test_psu1_battery_depleted_load1_still_on(self, backend):
+        """
+        PSU1 battery dead: LOAD1 can still receive power via PSU2→diode→CTRL1→LOAD1
+        cross-link, so LOAD1 stays lit (cross-chain redundancy).
+        PSU1 green LED goes off; PSU2, CTRL LEDs stay on.
+        """
+        s = _fresh_ac(backend)
+        s.inject_fault(DegradeComponent({"voltage": 0.0}), {"subject": s.component("psu1_battery")})
+        r = s.last_result
+        assert not r.is_lit("psu1_psu_green_led"), "PSU1 LED must go off with depleted battery"
+        assert r.is_lit("load1_main_bulb"), "LOAD1 must stay ON via PSU2 cross-link"
+        assert r.is_lit("load2_main_bulb"), "LOAD2 must stay ON"
+
+    def test_psu1_battery_depleted_repair(self, backend):
+        s = _fresh_ac(backend)
+        s.inject_fault(DegradeComponent({"voltage": 0.0}), {"subject": s.component("psu1_battery")})
+        assert not s.last_result.is_lit("psu1_psu_green_led")
+        s.component("psu1_battery")._fault_overlay.clear()
+        s.simulate()
+        assert s.last_result.is_lit("psu1_psu_green_led")
+        assert s.last_result.is_lit("load1_main_bulb")
+
+    def test_both_batteries_depleted_kills_everything(self, backend):
+        """With both PSUs dead, no path can power any load."""
+        s = _fresh_ac(backend)
+        s.inject_fault(DegradeComponent({"voltage": 0.0}), {"subject": s.component("psu1_battery")})
+        s.inject_fault(DegradeComponent({"voltage": 0.0}), {"subject": s.component("psu2_battery")})
+        r = s.last_result
+        assert not r.is_lit("load1_main_bulb")
+        assert not r.is_lit("load2_main_bulb")
+        assert not r.is_lit("psu1_psu_green_led")
+        assert not r.is_lit("psu2_psu_green_led")
+
+    def test_load1_cable_detached_kills_load1_only(self, backend):
+        """Detaching LOAD1 positive cable kills LOAD1; LOAD2 unaffected."""
+        s = _fresh_ac(backend)
+        s.inject_fault(DisconnectCable(port_names=["n"]), {"subject": s.component("load1_load_cable_pos")})
+        r = s.last_result
+        assert not r.is_lit("load1_main_bulb")
+        assert r.is_lit("load2_main_bulb")
+
+    def test_load1_cable_detached_repair(self, backend):
+        s = _fresh_ac(backend)
+        node = s.graph.nodes_of("load1_load_cable_pos")["n"]
+        s.inject_fault(DisconnectCable(port_names=["n"]), {"subject": s.component("load1_load_cable_pos")})
+        assert not s.last_result.is_lit("load1_main_bulb")
+        s.inject_fault(ReconnectCable(connections={"n": node}), {"subject": s.component("load1_load_cable_pos")})
+        assert s.last_result.is_lit("load1_main_bulb")
+
+    def test_burned_load2_bulb(self, backend):
+        """Burned LOAD2 main bulb: LOAD2 off, LOAD1 unaffected."""
+        s = _fresh_ac(backend)
+        s.inject_fault(DegradeComponent({"resistance": 1e9}), {"subject": s.component("load2_main_bulb")})
+        r = s.last_result
+        assert not r.is_lit("load2_main_bulb")
+        assert r.is_lit("load1_main_bulb")
+
+    def test_burned_load2_bulb_repair(self, backend):
+        s = _fresh_ac(backend)
+        s.inject_fault(DegradeComponent({"resistance": 1e9}), {"subject": s.component("load2_main_bulb")})
+        assert not s.last_result.is_lit("load2_main_bulb")
+        s.component("load2_main_bulb")._fault_overlay.clear()
+        s.simulate()
+        assert s.last_result.is_lit("load2_main_bulb")
+
+
+# ---------------------------------------------------------------------------
+# Cable repair — three paths for detached cable and loose connection
+# ---------------------------------------------------------------------------
+#
+# "Detached cable": the cable's port is floating (DisconnectCable on the cable).
+# "Loose connection": the neighbouring component has RECONNECTABLE affordance
+#   and _detached_cable_ports set — the cable is the culprit but the agent
+#   identifies the fault via the neighbour component.
+#
+# For each fault type we verify three independent repair paths:
+#   (A) ReconnectCable   — direct reconnection action on the cable
+#   (B) test_repair      — hypothesis verification with the cable ID
+#   (C) ReplaceComponent — replace the cable with a fresh one (also reconnects)
+#
+# For the loose-connection case the same three paths are used; the only
+# difference is that the fault is identified via the neighbour component but
+# the cable is still the subject of the repair action.
+# ---------------------------------------------------------------------------
+
+class TestCableDetachedRepairPaths:
+    """Three repair paths for a cable with a floating port."""
+
+    CABLE = "ctrl_cable_in_pos"
+    PORT  = "n"
+
+    def _broken(self, backend):
+        s = _fresh(backend)
+        s.inject_fault(DisconnectCable(port_names=[self.PORT]),
+                       {"subject": s.component(self.CABLE)})
+        assert not s.last_result.is_lit("main_bulb"), "lamp must be off before repair"
+        return s
+
+    def test_repair_via_reconnect_cable(self, backend):
+        """(A) ReconnectCable restores the system."""
+        s = self._broken(backend)
+        s.apply_action(ReconnectCable(), {"subject": s.component(self.CABLE)})
+        assert s.is_system_nominal(), "lamp must be on after ReconnectCable"
+
+    def test_repair_via_test_repair(self, backend):
+        """(B) test_repair returns True when the cable is nominated."""
+        s = self._broken(backend)
+        assert s.test_repair({self.CABLE}), "test_repair must confirm cable repairs the system"
+
+    def test_repair_via_replace_component(self, backend):
+        """(C) ReplaceComponent on a cable reconnects floating ports."""
+        s = self._broken(backend)
+        s.apply_action(ReplaceComponent("spare_cable"),
+                       {"subject": s.component(self.CABLE)})
+        assert s.is_system_nominal(), "lamp must be on after ReplaceComponent"
+
+
+class TestLooseConnectionRepairPaths:
+    """
+    Three repair paths when the fault is identified via the neighbour component
+    (loose connection / _detached_cable_ports set on the switch).
+
+    DisconnectCable sets RECONNECTABLE on every non-cable component that shared
+    a node with the disconnected port.  Here ctrl_switch shares the node that
+    ctrl_cable_in_pos.n was connected to, so it gets the loose-connection marker.
+    The cable (ctrl_cable_in_pos) is still the actual repair target.
+    """
+
+    CABLE     = "ctrl_cable_in_pos"
+    NEIGHBOUR = "ctrl_switch"
+    PORT      = "n"
+
+    def _broken(self, backend):
+        s = _fresh(backend)
+        s.inject_fault(DisconnectCable(port_names=[self.PORT]),
+                       {"subject": s.component(self.CABLE)})
+        assert not s.last_result.is_lit("main_bulb"), "lamp must be off before repair"
+        neighbour = s.component(self.NEIGHBOUR)
+        from diagnosable_systems_simulation.world.affordances import Affordance
+        assert Affordance.RECONNECTABLE in neighbour.affordances.all_active(neighbour, s.context), \
+            "neighbour must have RECONNECTABLE affordance after disconnect"
+        return s
+
+    def test_repair_via_reconnect_cable(self, backend):
+        """(A) ReconnectCable on the cable clears the neighbour's loose-connection marker."""
+        s = self._broken(backend)
+        s.apply_action(ReconnectCable(), {"subject": s.component(self.CABLE)})
+        assert s.is_system_nominal(), "lamp must be on after ReconnectCable"
+        neighbour = s.component(self.NEIGHBOUR)
+        from diagnosable_systems_simulation.world.affordances import Affordance
+        assert Affordance.RECONNECTABLE not in neighbour.affordances.all_active(neighbour, s.context), \
+            "RECONNECTABLE must be cleared from neighbour after reconnect"
+
+    def test_repair_via_test_repair_cable(self, backend):
+        """(B) test_repair with the cable ID confirms the repair."""
+        s = self._broken(backend)
+        assert s.test_repair({self.CABLE}), \
+            "test_repair must confirm cable repairs the system"
+
+    def test_repair_via_replace_component(self, backend):
+        """(C) ReplaceComponent on the cable also clears the neighbour marker."""
+        s = self._broken(backend)
+        s.apply_action(ReplaceComponent("spare_cable"),
+                       {"subject": s.component(self.CABLE)})
+        assert s.is_system_nominal(), "lamp must be on after ReplaceComponent"
+        neighbour = s.component(self.NEIGHBOUR)
+        from diagnosable_systems_simulation.world.affordances import Affordance
+        assert Affordance.RECONNECTABLE not in neighbour.affordances.all_active(neighbour, s.context), \
+            "RECONNECTABLE must be cleared from neighbour after replace"
 
 
 if __name__ == "__main__":

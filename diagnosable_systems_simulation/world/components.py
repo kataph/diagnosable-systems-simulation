@@ -311,6 +311,7 @@ class Cable(Component):
                     Affordance.REACHABLE,
                     Affordance.DETACHABLE,
                     Affordance.MEASURABLE,
+                    Affordance.REPLACEABLE,
                 }
             ),
             position=position,

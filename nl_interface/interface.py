@@ -60,6 +60,10 @@ MODEL = "nf-gpt-4o-2024-08-06"
 Backend = Literal["openai", "anthropic"]
 BACKEND: Backend = "openai"
 
+_TEMPERATURE = 0.0
+_TOP_P = 1.0
+_SEED = 42
+
 # ---------------------------------------------------------------------------
 # Action registry
 # Each entry: action_id → (class, {constructor_kwarg: description})
@@ -135,19 +139,25 @@ class TextClient:
         match self.backend:
             case "openai":
                 return self._client.responses.create(
-                    model=model, 
+                    model=model,
                     max_output_tokens=max_output_tokens,
+                    temperature=_TEMPERATURE,
+                    top_p=_TOP_P,
+                    seed=_SEED,
                     input=[
                         {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},]
-                    ).output_text.strip()
+                        {"role": "user", "content": user_prompt},
+                    ],
+                ).output_text.strip()
             case "anthropic":
                 return self._client.messages.create(
                     model=model,
                     max_tokens=max_output_tokens,
+                    temperature=_TEMPERATURE,
+                    top_p=_TOP_P,
                     system=system_prompt,
                     messages=[{"role": "user", "content": user_prompt}],
-                    ).content[0].text.strip()
+                ).content[0].text.strip()
 
 
 _CLIENT: "TextClient | None" = None
@@ -356,6 +366,7 @@ def _execute(entries: list[dict], system, allowed_actions: "set[str] | None" = N
 
     entries = _expand_enclosure_targets(entries, system)
     results = []
+    _convergence_noted = False  # surface converged=False once per _execute call
     for entry in entries:
         action_id = entry.get("action_id", "?")
 
@@ -531,6 +542,17 @@ def _execute(entries: list[dict], system, allowed_actions: "set[str] | None" = N
                         results.append((OpenInspectionPanel(), {"subject":_panel_cid}, ActionResult(message=f"auto-opened panel {_panel_cid} for cable inspection")))
                     for _enc_cid in filter(None, obs_lookup.get("auto_inverted_enclosure_ids", "").split("; ")):
                         results.append((InvertEnclosure(), {"subject":_enc_cid}, ActionResult(message=f"auto-inverted enclosure {_enc_cid} for cable inspection")))
+                # Surface converged=False once so the verbalize LLM can relay
+                # the oscillation / instability information to the agent.
+                if not _convergence_noted and result.success:
+                    last_res = getattr(system, "last_result", None)
+                    if last_res is not None and not last_res.converged:
+                        result.message = (
+                            result.message
+                            + "\n[NOTE: The simulation did not converge — "
+                            "the circuit is in an unstable or oscillating state.]"
+                        )
+                        _convergence_noted = True
                 results.append((action, targets, result))
                 continue
         except Exception as exc:

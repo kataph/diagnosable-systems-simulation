@@ -57,9 +57,17 @@ def _when_inverted_only(enclosure):
 # PSU module  (identical for all systems)
 # ---------------------------------------------------------------------------
 
-def create_psu_module(x_left: float = 0.0) -> SimpleNamespace:
+def create_psu_module(x_left: float = 0.0, prefix: str = "") -> SimpleNamespace:
     """
     Build and return a fresh Power Supply module.
+
+    Parameters
+    ----------
+    prefix
+        Optional ID prefix (e.g. ``"psu1"``).  When given, all component IDs
+        become ``"<prefix>_battery"``, ``"cube_<prefix>"``, etc.  When empty
+        (default) the original unprefixed IDs are used — all existing call
+        sites remain unaffected.
 
     Returned namespace attributes
     ------------------------------
@@ -67,94 +75,94 @@ def create_psu_module(x_left: float = 0.0) -> SimpleNamespace:
     ALL  — ``{component_id: component}`` dict
     """
     x = x_left
+    p = f"{prefix}_" if prefix else ""
+    lbl = f" {prefix.upper()}" if prefix else ""
+    cube_id = f"cube_{prefix}" if prefix else "cube_psu"
 
     module = Module(
-        component_id="module_psu",
-        display_name="Power Supply Module",
+        component_id=f"{p}module_psu",
+        display_name=f"Power Supply Module{lbl}",
         position=Position(x + 0.05, 0.05, 0.05),
     )
     cube = PhysicalEnclosure(
-        component_id="cube_psu",
-        display_name="Power Supply Cube",
+        component_id=cube_id,
+        display_name=f"Power Supply Cube{lbl}",
         position=Position(x + 0.05, 0.05, 0.05),
     )
     source = VoltageSource(
-        component_id="battery",
-        display_name="Battery",
+        component_id=f"{p}battery",
+        display_name=f"Battery{lbl}",
         voltage=12.0,
         position=Position(x + 0.05, 0.05, 0.05),
-        enclosure_id="cube_psu",
+        enclosure_id=cube_id,
     )
     source.affordances = AffordanceSet(
         static={Affordance.MEASURABLE, Affordance.REPLACEABLE},
         conditional=[
             ConditionalAffordance(
                 Affordance.REACHABLE, _when_inverted_only(cube),
-                "reachable when PSU cube is inverted",
+                f"reachable when PSU cube{lbl} is inverted",
             ),
         ],
     )
     battery_internal_resistor = Resistor(
-        component_id="battery_internal_resistor",
-        display_name="Battery Internal Resistor",
+        component_id=f"{p}battery_internal_resistor",
+        display_name=f"Battery Internal Resistor{lbl}",
         resistance=1.0,
         position=Position(x + 0.05, 0.05, 0.05),
-        enclosure_id="cube_psu",
+        enclosure_id=cube_id,
     )
     battery_internal_resistor.affordances = AffordanceSet(
         static={Affordance.MEASURABLE, Affordance.REPLACEABLE},
         conditional=[ConditionalAffordance(
             Affordance.REACHABLE, _when_inverted_only(cube),
-            "reachable when PSU cube is inverted",
+            f"reachable when PSU cube{lbl} is inverted",
         )],
     )
     green_led = LED(
-        component_id="psu_green_led",
-        display_name="PSU Status LED (green)",
+        component_id=f"{p}psu_green_led",
+        display_name=f"PSU Status LED (green){lbl}",
         forward_voltage=2.1,
         forward_current=0.01,
         color="green",
         position=Position(x + 0.05, 0.05, 0.10),
-        enclosure_id="cube_psu",
+        enclosure_id=cube_id,
     )
     green_led.affordances = AffordanceSet(
         static={Affordance.REACHABLE, Affordance.MEASURABLE, Affordance.REPLACEABLE},
     )
     green_resistor = Resistor(
-        component_id="psu_green_resistor",
-        display_name="PSU Green LED Resistor",
+        component_id=f"{p}psu_green_resistor",
+        display_name=f"PSU Green LED Resistor{lbl}",
         resistance=1000.0,
         position=Position(x + 0.05, 0.05, 0.08),
-        enclosure_id="cube_psu",
+        enclosure_id=cube_id,
     )
     green_resistor.affordances = AffordanceSet(
         static={Affordance.MEASURABLE, Affordance.REPLACEABLE},
         conditional=[ConditionalAffordance(
             Affordance.REACHABLE, _when_inverted_only(cube),
-            "reachable when PSU cube is inverted",
+            f"reachable when PSU cube{lbl} is inverted",
         )],
     )
     cable_pos = Cable(
-        component_id="psu_cable_pos",
-        display_name="PSU Output Cable (+)",
+        component_id=f"{p}psu_cable_pos",
+        display_name=f"PSU Output Cable (+){lbl}",
         position=Position(x + 0.10, 0.05, 0.05),
     )
     cable_neg = Cable(
-        component_id="psu_cable_neg",
-        display_name="PSU Output Cable (−)",
+        component_id=f"{p}psu_cable_neg",
+        display_name=f"PSU Output Cable (−){lbl}",
         position=Position(x + 0.10, 0.05, 0.03),
     )
     # p-terminals connect inside the PSU cube; n-terminals are external connectors.
-    cable_pos.port_enclosures = {"p": cube.component_id}
-    cable_neg.port_enclosures = {"p": cube.component_id}
+    cable_pos.port_enclosures = {"p": cube_id}
+    cable_neg.port_enclosures = {"p": cube_id}
 
     # LED-slot metadata used by MoveLED action.
-    # The slot anchors are the components/ports the resistor.p and LED.cathode
-    # connect to in this module.  They stay in the circuit even when the LED
-    # and resistor are removed, so MoveLED can find the correct node IDs.
     green_led._series_resistor_id = green_resistor.component_id
-    cube._led_slot_pos = (source, "pos")   # resistor.p connects here
-    cube._led_slot_neg = (source, "neg")   # LED.cathode connects here (GND)
+    cube._led_slot_pos = (source, "pos")
+    cube._led_slot_neg = (source, "neg")
 
     all_comps = [module, cube, source, green_led, green_resistor, cable_pos, cable_neg, battery_internal_resistor]
     ns = SimpleNamespace(
@@ -419,12 +427,19 @@ def create_10cubes_control_module(
 # Load module  (identical for all systems — diode always here)
 # ---------------------------------------------------------------------------
 
-def create_load_module(x_left: float = 0.30) -> SimpleNamespace:
+def create_load_module(x_left: float = 0.30, prefix: str = "") -> SimpleNamespace:
     """
     Build and return a fresh Load module.
 
     The protection diode is always part of the load module for all system
     variants (3-cubes and 10-cubes alike).
+
+    Parameters
+    ----------
+    prefix
+        Optional ID prefix (e.g. ``"load1"``).  When given, all component IDs
+        become ``"<prefix>_main_bulb"``, ``"cube_<prefix>"``, etc.  When empty
+        (default) the original unprefixed IDs are used.
 
     Returned namespace attributes
     ------------------------------
@@ -432,55 +447,56 @@ def create_load_module(x_left: float = 0.30) -> SimpleNamespace:
     ALL  — ``{component_id: component}`` dict
     """
     x = x_left
+    p = f"{prefix}_" if prefix else ""
+    lbl = f" {prefix.upper()}" if prefix else ""
+    cube_id = f"cube_{prefix}" if prefix else "cube_load"
 
     module = Module(
-        component_id="module_load",
-        display_name="Load Module",
+        component_id=f"{p}module_load",
+        display_name=f"Load Module{lbl}",
         position=Position(x + 0.05, 0.05, 0.05),
     )
     cube = PhysicalEnclosure(
-        component_id="cube_load",
-        display_name="Load Cube",
+        component_id=cube_id,
+        display_name=f"Load Cube{lbl}",
         position=Position(x + 0.05, 0.05, 0.05),
     )
     peephole = Peephole(
-        component_id="load_peephole",
-        display_name="Load Cube Peephole",
+        component_id=f"{p}load_peephole",
+        display_name=f"Load Cube Peephole{lbl}",
         position=Position(x, 0.10, 0.05),
-        enclosure_id="cube_load",
+        enclosure_id=cube_id,
     )
     peephole._nominal_observation_note = (
         "This is an access hole on the load cube, not a sensor or light source. "
-        "To look inside: first call open_peephole on load_peephole, "
-        "then call observe_component on internal_bulb."
+        f"To look inside: first call open_peephole on {p}load_peephole, "
+        f"then call observe_component on {p}internal_bulb."
     )
 
     def _visible(component, _ctx):
-        """Visible when cube is inverted OR peephole is open (but not necessarily reachable)."""
         return cube.is_inverted or peephole.is_open
 
     def _reachable(component, _ctx):
-        """Physical probe/replacement access requires inverting the cube."""
         return cube.is_inverted
 
     main_bulb = Bulb(
-        component_id="main_bulb",
-        display_name="Main Load (lamp)",
+        component_id=f"{p}main_bulb",
+        display_name=f"Main Load (lamp){lbl}",
         resistance=120.0,
         power_threshold=0.05,
         position=Position(x + 0.05, 0.05, 0.10),
-        enclosure_id="cube_load",
+        enclosure_id=cube_id,
     )
     main_bulb.affordances = AffordanceSet(
         static={Affordance.REACHABLE, Affordance.MEASURABLE, Affordance.REPLACEABLE},
     )
     internal_bulb = Bulb(
-        component_id="internal_bulb",
-        display_name="Internal Indicator Lamp",
+        component_id=f"{p}internal_bulb",
+        display_name=f"Internal Indicator Lamp{lbl}",
         resistance=500.0,
         power_threshold=0.01,
         position=Position(x + 0.05, 0.05, 0.05),
-        enclosure_id="cube_load",
+        enclosure_id=cube_id,
     )
     internal_bulb._nominal_observation_note = (
         "This lamp is connected in parallel with the main load and reflects voltage conditions across that branch."
@@ -489,54 +505,53 @@ def create_load_module(x_left: float = 0.30) -> SimpleNamespace:
         conditional=[
             ConditionalAffordance(
                 Affordance.OBSERVABLE, _visible,
-                "observable when load cube is inverted or peephole is open",
+                f"observable when load cube{lbl} is inverted or peephole is open",
             ),
             ConditionalAffordance(
                 Affordance.REACHABLE, _reachable,
-                "reachable when load cube is inverted",
+                f"reachable when load cube{lbl} is inverted",
             ),
             ConditionalAffordance(
                 Affordance.MEASURABLE, _reachable,
-                "measurable only when load cube is inverted (probe access)",
+                f"measurable only when load cube{lbl} is inverted (probe access)",
             ),
             ConditionalAffordance(
                 Affordance.REPLACEABLE, _reachable,
-                "replaceable only when load cube is inverted",
+                f"replaceable only when load cube{lbl} is inverted",
             ),
         ],
     )
     load_diode = Diode(
-        component_id="load_diode",
-        display_name="Load Protection Diode",
+        component_id=f"{p}load_diode",
+        display_name=f"Load Protection Diode{lbl}",
         forward_voltage=0.7,
         position=Position(x + 0.02, 0.05, 0.05),
-        enclosure_id="cube_load",
+        enclosure_id=cube_id,
     )
     load_diode.affordances = AffordanceSet(
         conditional=[
             ConditionalAffordance(
                 Affordance.OBSERVABLE, _visible,
-                "observable when load cube is inverted or peephole is open",
+                f"observable when load cube{lbl} is inverted or peephole is open",
             ),
             ConditionalAffordance(
                 Affordance.REACHABLE, _reachable,
-                "reachable when load cube is inverted",
+                f"reachable when load cube{lbl} is inverted",
             ),
             ConditionalAffordance(
                 Affordance.MEASURABLE, _reachable,
-                "measurable only when load cube is inverted (probe access)",
+                f"measurable only when load cube{lbl} is inverted (probe access)",
             ),
             ConditionalAffordance(
                 Affordance.REPLACEABLE, _reachable,
-                "replaceable only when load cube is inverted",
+                f"replaceable only when load cube{lbl} is inverted",
             ),
         ],
     )
-    cable_pos = Cable("load_cable_pos", "Load Input Cable (+)", position=Position(x,        0.05, 0.07))
-    cable_neg = Cable("load_cable_neg", "Load Input Cable (−)", position=Position(x,        0.05, 0.03))
-    # n-terminals connect inside the load cube (diode anode and bulb negative rails).
-    cable_pos.port_enclosures = {"n": cube.component_id}
-    cable_neg.port_enclosures = {"n": cube.component_id}
+    cable_pos = Cable(f"{p}load_cable_pos", f"Load Input Cable (+){lbl}", position=Position(x,        0.05, 0.07))
+    cable_neg = Cable(f"{p}load_cable_neg", f"Load Input Cable (−){lbl}", position=Position(x,        0.05, 0.03))
+    cable_pos.port_enclosures = {"n": cube_id}
+    cable_neg.port_enclosures = {"n": cube_id}
 
     all_comps = [module, cube, peephole, main_bulb, internal_bulb, load_diode, cable_pos, cable_neg]
     ns = SimpleNamespace(
@@ -740,6 +755,142 @@ def create_ambient_ctrl_module(prefix: str = "ctrl") -> SimpleNamespace:
         light_sensor=light_sensor, relay=relay,
         sensitivity_pot=sensitivity_pot, timing_pot=timing_pot,
         sensor_bias=sensor_bias,
+        cable_in_pos=cable_in_pos, cable_in_neg=cable_in_neg,
+        cable_out_pos=cable_out_pos, cable_out_neg=cable_out_neg,
+    )
+    ns.ALL = {c.component_id: c for c in all_comps}
+    return ns
+
+
+# ---------------------------------------------------------------------------
+# Current sensor control module
+# ---------------------------------------------------------------------------
+
+def create_current_sensor_ctrl_module(
+    prefix: str = "ctrl",
+    x_left: float = 0.15,
+) -> SimpleNamespace:
+    """
+    Build the control module for the **current sensor** system.
+
+    The module contains a relay on the **0V/negative line** controlled by a
+    current sensor.  When the circuit current exceeds a threshold the relay
+    opens the return path, stopping current flow.
+
+    A green indicator LED (anode→resistor→12V input net, cathode→relay output
+    on the 0V side) lights whenever the relay is closed and current flows —
+    i.e. in normal operation.
+
+    Circuit topology (nets relative to ``cable_in_pos.n`` = 12V input):
+
+        ctrl_in_p net:  cable_in_pos.n  → cable_out_pos.p
+                                        → green_resistor.p
+        green_mid net:  green_resistor.n → green_led.anode
+        relay topology: cable_in_neg.n  → relay.p          (0V line interrupted)
+        relay_out net:  relay.n         → cable_out_neg.p
+                                        → green_led.cathode
+
+    Component IDs use ``prefix`` as a stem, e.g. with ``prefix="ctrl"``:
+        cube_ctrl, ctrl_panel, ctrl_relay,
+        ctrl_green_led, ctrl_green_resistor,
+        ctrl_cable_in_pos, ctrl_cable_in_neg,
+        ctrl_cable_out_pos, ctrl_cable_out_neg
+
+    Returned namespace attributes
+    ------------------------------
+    module, cube, panel, relay, green_led, green_resistor,
+    cable_in_pos, cable_in_neg, cable_out_pos, cable_out_neg
+    ALL  — ``{component_id: component}`` dict
+    """
+    p = prefix + "_"
+    x = x_left
+
+    module = Module(
+        component_id=f"module_{prefix}",
+        display_name="Current Sensor Control Module",
+        position=Position(x + 0.05, 0.05, 0.05),
+    )
+    cube = PhysicalEnclosure(
+        component_id=f"cube_{prefix}",
+        display_name="Current Sensor Control Cube",
+        position=Position(x + 0.05, 0.05, 0.05),
+    )
+    panel = InspectionPanel(
+        component_id=f"{p}panel",
+        display_name="Current Sensor Control Module Inspection Panel",
+        position=Position(x, 0.05, 0.05),
+        enclosure_id=f"cube_{prefix}",
+    )
+    panel._nominal_observation_note = (
+        "Removable side panel on the current sensor control cube. "
+        "Opening it gives probe access to internal components without rotating the cube."
+    )
+
+    _panel_or_inverted = _when_inverted(cube, peephole=panel)
+
+    relay = Switch(
+        component_id=f"{p}relay",
+        display_name="Current Sensor Relay",
+        is_closed=True,
+        position=Position(x + 0.05, 0.05, 0.05),
+        enclosure_id=f"cube_{prefix}",
+    )
+    relay.affordances = AffordanceSet(
+        static={Affordance.MEASURABLE, Affordance.REPLACEABLE},
+        conditional=[
+            ConditionalAffordance(
+                Affordance.OBSERVABLE, _panel_or_inverted,
+                "observable when inspection panel is open or cube is rotated",
+            ),
+            ConditionalAffordance(
+                Affordance.REACHABLE, _panel_or_inverted,
+                "reachable when inspection panel is open or cube is rotated",
+            ),
+        ],
+    )
+    green_led = LED(
+        component_id=f"{p}green_led",
+        display_name="Cable Indicator LED (green)",
+        forward_voltage=2.1,
+        forward_current=0.01,
+        color="green",
+        position=Position(x + 0.05, 0.05, 0.10),
+        enclosure_id=f"cube_{prefix}",
+    )
+    green_led.affordances = AffordanceSet(
+        static={Affordance.REACHABLE, Affordance.MEASURABLE, Affordance.REPLACEABLE},
+    )
+    green_resistor = Resistor(
+        component_id=f"{p}green_resistor",
+        display_name="Cable Indicator LED Resistor",
+        resistance=1000.0,
+        position=Position(x + 0.05, 0.05, 0.08),
+        enclosure_id=f"cube_{prefix}",
+    )
+    green_resistor.affordances = AffordanceSet(
+        static={Affordance.MEASURABLE, Affordance.REPLACEABLE},
+        conditional=[ConditionalAffordance(
+            Affordance.REACHABLE, _panel_or_inverted,
+            "reachable when inspection panel is open or cube is rotated",
+        )],
+    )
+
+    cable_in_pos  = Cable(f"{p}cable_in_pos",  "Current Sensor Input Cable (+)",  position=Position(x,        0.05, 0.07))
+    cable_in_neg  = Cable(f"{p}cable_in_neg",  "Current Sensor Input Cable (−)",  position=Position(x,        0.05, 0.03))
+    cable_out_pos = Cable(f"{p}cable_out_pos", "Current Sensor Output Cable (+)", position=Position(x + 0.10, 0.05, 0.07))
+    cable_out_neg = Cable(f"{p}cable_out_neg", "Current Sensor Output Cable (−)", position=Position(x + 0.10, 0.05, 0.03))
+    cable_in_pos.port_enclosures  = {"n": f"cube_{prefix}"}
+    cable_in_neg.port_enclosures  = {"n": f"cube_{prefix}"}
+    cable_out_pos.port_enclosures = {"p": f"cube_{prefix}"}
+    cable_out_neg.port_enclosures = {"p": f"cube_{prefix}"}
+
+    all_comps = [
+        module, cube, panel, relay, green_led, green_resistor,
+        cable_in_pos, cable_in_neg, cable_out_pos, cable_out_neg,
+    ]
+    ns = SimpleNamespace(
+        module=module, cube=cube, panel=panel,
+        relay=relay, green_led=green_led, green_resistor=green_resistor,
         cable_in_pos=cable_in_pos, cable_in_neg=cable_in_neg,
         cable_out_pos=cable_out_pos, cable_out_neg=cable_out_neg,
     )
