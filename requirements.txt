@@ -1,0 +1,22 @@
+# Pinned dependencies for reproducible environments.
+# Install with: pip install -r requirements.txt
+# Then: pip install -e ".[all]" --no-deps
+
+# LLM clients
+anthropic==0.86.0
+openai==2.15.0
+
+# Simulation backend
+PySpice==1.5
+
+# HTTP / async (transitive, pinned for stability)
+httpx==0.28.1
+httpx-sse==0.4.3
+anyio==4.11.0
+
+# Data validation (transitive)
+pydantic==2.12.5
+pydantic_core==2.41.5
+
+# Testing
+pytest==9.0.2
