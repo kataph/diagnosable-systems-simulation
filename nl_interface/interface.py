@@ -55,8 +55,7 @@ _DIAGNOSTIC_ALLOWED_ACTIONS: set[str] = {
 
 
 
-MODEL = "nf-gpt-4o-2024-08-06"
-# MODEL = "gpt-4.1"
+MODEL = "gpt-4.1"
 Backend = Literal["openai", "anthropic"]
 BACKEND: Backend = "openai"
 
@@ -143,7 +142,6 @@ class TextClient:
                     max_output_tokens=max_output_tokens,
                     temperature=_TEMPERATURE,
                     top_p=_TOP_P,
-                    seed=_SEED,
                     input=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt},
@@ -267,7 +265,8 @@ def _parse(text: str, system: DiagnosableSystem, model: str = MODEL, allowed_act
         f"System components:\n{_component_menu(system)}\n\n"
         f"Instruction: {text}"
     )
-    _logger.debug(f"_parse prompt:\n{prompt}")
+    if _logger:
+        _logger.debug(f"_parse prompt:\n{prompt}")
     raw = _client().create(
         model=model,
         system_prompt=_PARSE_SYSTEM,
@@ -275,17 +274,19 @@ def _parse(text: str, system: DiagnosableSystem, model: str = MODEL, allowed_act
         max_output_tokens=2048,
     )
     if not raw.rstrip().endswith("]"):
-        _logger.warning(
-            "nl_interface._parse: response does not end with ']' — likely truncated. "
-            f"Length={len(raw)} chars. Tail: {raw[-120:]!r}"
-        )
+        if _logger:
+            _logger.warning(
+                "nl_interface._parse: response does not end with ']' — likely truncated. "
+                f"Length={len(raw)} chars. Tail: {raw[-120:]!r}"
+            )
     try:
         return json.loads(raw)
     except json.JSONDecodeError as exc:
-        _logger.warning(
-            f"nl_interface._parse: JSON decode failed ({exc}). "
-            f"Raw response was: {raw!r}. Returning empty action list."
-        )
+        if _logger:
+            _logger.warning(
+                f"nl_interface._parse: JSON decode failed ({exc}). "
+                f"Raw response was: {raw!r}. Returning empty action list."
+            )
         return []
 
 
@@ -345,7 +346,7 @@ def _expand_enclosure_targets(entries: list[dict], system) -> list[dict]:
                         for part in system.parts_of_module(subject_id)
                         if part.component_id not in removed
                     ]
-                elif entry.get("action_id") in ["observe_component", "measure_voltage", "measure_current", "replace_component"]:
+                elif entry.get("action_id") in ["observe_component", "measure_voltage", "measure_current", "replace_component", "inspect_connections"]:
                     # Expand to components physically inside the enclosure only for certain action types.
                     sub_entries = [
                         {**entry, "subject": cid}
@@ -415,6 +416,7 @@ def _execute(entries: list[dict], system, allowed_actions: "set[str] | None" = N
             source_id  = entry.get("source")
             sink_id    = entry.get("sink")
             # Unknown component IDs: return a clear "not recognized" result.
+            _unknown_found = False
             for cid_key, cid_val in (("subject", subject_id), ("source", source_id), ("sink", sink_id)):
                 if cid_val and cid_val not in removed:
                     try:
@@ -426,8 +428,11 @@ def _execute(entries: list[dict], system, allowed_actions: "set[str] | None" = N
                         )
                         action = type("_stub", (), {"action_id": action_id, "cost": ActionCost()})()
                         results.append((action, {"subject": subject_id, "source": source_id, "sink": sink_id}, result))
+                        _unknown_found = True
                         break
-            else:
+            if _unknown_found:
+                continue
+            if True:
                 if source_id and sink_id:
                     targets = {
                         "source": system.component(source_id),
@@ -586,7 +591,7 @@ _verbalize_prompt_costrained ="""\
 You are going to receive a description of an action executed on a system by an engineer. The action is divided into 1 or more steps, together with the resulting step outcomes.
 You are to process the results and give feedback to engineer by attaining yourself to the reporting requirements below: 
 """
-def _verbalize(results: list[tuple], original_text: str, model: str = MODEL, reporting_requirements: "str | None" = None, logger: Logger | None = None) -> str:
+def _verbalize(results: list[tuple], original_text: str = "", model: str = MODEL, reporting_requirements: "str | None" = None, logger: Logger | None = None) -> str:
     full_description = original_text
     if not reporting_requirements:
         system_prompt = _verbalize_prompt_free + "\n\nACTION:\n" + original_text
@@ -594,7 +599,8 @@ def _verbalize(results: list[tuple], original_text: str, model: str = MODEL, rep
         system_prompt = _verbalize_prompt_costrained + "\n\nACTION:\n" + original_text + "\n\nREPORTING REQUIREMENTS:\n" + reporting_requirements
         
     lines = ["\nSTEPS:\n"]
-    for action, targets, result in results:
+    for entry in results:
+        action, targets, result = (entry if len(entry) == 3 else (entry[0], None, entry[1]))
         action_id = getattr(action, "action_id", "n.a.")
         description = getattr(action, "description", "n.a.")
         targets = targets or 'n.a.'
@@ -613,8 +619,6 @@ def _verbalize(results: list[tuple], original_text: str, model: str = MODEL, rep
     if logger:
         logger.debug(f"dynamic system prompt in verbalize function:\n{system_prompt}")
         logger.debug(f"dynamic user prompt in verbalize function:\n{user_prompt}")
-    if not logger:
-        raise Exception("Why did this happen?")
     return _client().create(
         model=model,
         system_prompt=system_prompt,
@@ -633,11 +637,14 @@ def run(text: str, system: DiagnosableSystem, model: str = MODEL, mode: Literal[
     plain-language summary together with the total action cost.
     Return textual outcome, cost, parsed actions, action results
 
-    mode: 'verify', restricts the action registry to a repair action to verify an hypothesis.  
+    mode: 'verify', restricts the action registry to a repair action to verify an hypothesis.
         'collect_information' prevents the NL agent from attempting repair or
         fault-injection actions during ordinary diagnosis.
     """
-    
+    import logging as _logging
+    if _logger is None:
+        _logger = _logging.getLogger(__name__)
+
     match mode:
         case 'verify':
             allowed_actions = {'verify_repair'}

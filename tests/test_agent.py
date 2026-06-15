@@ -3,11 +3,17 @@ Integration tests for the LLM agent (uses real LLM via TextClient / OpenAI backe
 
 Run:  python -m pytest tests/test_agent.py -v -s
 """
+import os
 import pytest
 from diagnosable_systems_simulation.electrical_simulation.backend.spice import PySpiceBackend
 BACKEND = PySpiceBackend()
 from diagnosable_systems_simulation.systems.three_cubes.factory import build_three_cubes_system
 from nl_interface.interface import _instantiate, _parse, _verbalize, _REGISTRY
+
+requires_llm = pytest.mark.skipif(
+    os.environ.get("SKIP_LLM_TESTS", "1") == "1",
+    reason="Live LLM tests skipped (set SKIP_LLM_TESTS=0 to enable)",
+)
 
 
 @pytest.fixture(scope="module")
@@ -24,6 +30,7 @@ def _show(label, value):
 # text2action
 # ---------------------------------------------------------------------------
 
+@requires_llm
 def test_parse_multi_action(system):
     text = "measure voltage at the main bulb and toggle the control switch"
     result = _parse(text, system)
@@ -35,6 +42,7 @@ def test_parse_multi_action(system):
         assert "subject" in entry
 
 
+@requires_llm
 def test_parse_single_observe(system):
     text = "observe the green LED on the power supply"
     result = _parse(text, system)
@@ -44,6 +52,7 @@ def test_parse_single_observe(system):
     assert result[0]["subject"] == "psu_green_led"
 
 
+@requires_llm
 def test_parse_continuity_check(system):
     text = "test the continuity of the main bulb filament"
     result = _parse(text, system)
@@ -80,6 +89,7 @@ def test_instantiate_with_params():
 # output2verbalization
 # ---------------------------------------------------------------------------
 
+@requires_llm
 def test_verbalize_measure(system):
     from diagnosable_systems_simulation.actions.diagnostic_actions import MeasureVoltage
     action = MeasureVoltage()
@@ -90,6 +100,7 @@ def test_verbalize_measure(system):
     assert isinstance(out, str) and len(out) > 0
 
 
+@requires_llm
 def test_verbalize_failure(system):
     """Precondition not met (internal_bulb not yet observable) — failure verbalized."""
     from diagnosable_systems_simulation.actions.diagnostic_actions import MeasureVoltage
@@ -102,6 +113,7 @@ def test_verbalize_failure(system):
     assert isinstance(out, str) and len(out) > 0
 
 
+@requires_llm
 def test_verbalize_multi_action(system):
     from diagnosable_systems_simulation.actions.diagnostic_actions import ObserveComponent, MeasureVoltage
     pairs = []

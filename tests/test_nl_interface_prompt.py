@@ -124,7 +124,7 @@ class TestComponentMenu:
 
     def test_display_names_present(self, system):
         menu = _component_menu(system)
-        assert "Main Lightbulb" in menu
+        assert "Main Load (lamp)" in menu
         assert "Control Switch" in menu
 
     def test_enclosed_components_annotated(self, system):
