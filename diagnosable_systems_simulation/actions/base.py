@@ -162,3 +162,48 @@ class Action(ABC):
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}(id={self.action_id!r})"
+
+
+class CompositeAction(Action):
+    """
+    A compound action built from an ordered sequence of atomic sub-actions.
+
+    Cost is derived as the sum of all sub-action costs via ActionCost.__add__.
+    Preconditions are the union of all sub-action preconditions.
+    Execution runs each sub-action in order on the shared graph/context with
+    no intermediate re-simulation — the single re-simulation is triggered by
+    DiagnosableSystem.apply_action after execute() returns, as usual.
+
+    Subclasses must implement ``sub_actions`` as a property that returns
+    a list of (action, targets_dict) pairs.  Targets are resolved lazily
+    (at call time) so that dynamic values such as current node IDs are
+    captured at the moment of execution, not at construction.
+    """
+
+    mutates_graph: bool = True
+
+    @property
+    def sub_actions(self) -> "list[tuple[Action, dict]]":
+        raise NotImplementedError
+
+    @property
+    def cost(self) -> ActionCost:
+        total = ActionCost()
+        for action, _ in self.sub_actions:
+            total = total + action.cost
+        return total
+
+    def check_preconditions(self, targets, context) -> "tuple[bool, str]":
+        failures: list[str] = []
+        for action, sub_targets in self.sub_actions:
+            ok, reason = action.check_preconditions(sub_targets, context)
+            if not ok:
+                failures.append(reason)
+        return (not bool(failures)), "; ".join(failures)
+
+    def execute(self, targets, graph, context, last_result) -> ActionResult:
+        messages: list[str] = []
+        for action, sub_targets in self.sub_actions:
+            result = action.execute(sub_targets, graph, context, last_result)
+            messages.append(result.message)
+        return ActionResult(message=" | ".join(messages))

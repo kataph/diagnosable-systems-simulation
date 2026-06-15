@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from diagnosable_systems_simulation.actions.base import Action, ActionCost, ActionResult
+from diagnosable_systems_simulation.actions.base import Action, ActionCost, ActionResult, CompositeAction
 from diagnosable_systems_simulation.actions.preconditions import (
     AffordanceRequirement, PreconditionChecker
 )
@@ -23,7 +23,7 @@ class DisconnectCable(Action):
 
     action_id = "disconnect_cable"
     description = "Detach a cable's connector from the circuit."
-    cost = ActionCost(time=40.0)
+    cost = ActionCost(time=10.0)
     mutates_graph = True
 
     def __init__(self, port_names: list[str] | None = None):
@@ -93,7 +93,7 @@ class ReconnectCable(Action):
 
     action_id = "reconnect_cable"
     description = "Reconnect a detached cable to its original position (or to specified nodes)."
-    cost = ActionCost(time=40.0)
+    cost = ActionCost(time=10.0)
     mutates_graph = True
 
     def __init__(self, connections: dict[str, str] | None = None):
@@ -157,7 +157,7 @@ class ShortCircuit(Action):
 
     action_id = "short_circuit"
     description = "Insert a short circuit between two nodes."
-    cost = ActionCost(time=40.0)
+    cost = ActionCost(time=30.0)
     mutates_graph = True
 
     def __init__(self, node_a: str, node_b: str, short_id: str):
@@ -195,7 +195,7 @@ class DegradeComponent(Action):
 
     action_id = "degrade_component"
     description = "Degrade one or more electrical parameters of a component."
-    cost = ActionCost(time=40.0)
+    cost = ActionCost(time=120.0)
     mutates_graph = True
 
     def __init__(self, degradation: dict):
@@ -223,7 +223,7 @@ class BlowFuse(Action):
 
     action_id = "blow_fuse"
     description = "Blow a fuse, making it an open circuit."
-    cost = ActionCost(time=40.0)
+    cost = ActionCost(time=120.0)
     mutates_graph = True
 
     def check_preconditions(self, targets, context):
@@ -247,7 +247,7 @@ class ForceSwitch(Action):
 
     action_id = "force_switch"
     description = "Force a switch to a specific position as a fault."
-    cost = ActionCost(time=40.0)
+    cost = ActionCost(time=120.0)
     mutates_graph = True
 
     def __init__(self, is_closed: bool):
@@ -263,3 +263,99 @@ class ForceSwitch(Action):
         sw.apply_fault({"is_closed": self.is_closed})
         state = "closed" if self.is_closed else "open"
         return ActionResult(message=f"Switch {sw.display_name!r} forced {state}.")
+
+
+class ReverseBattery(Action):
+    """
+    Physically reverse the polarity of a battery (install it backwards).
+
+    Toggles the sign of the battery voltage: +V → -V → +V.
+    When the result equals the nominal voltage the fault overlay is cleared
+    (battery is back to correct orientation).
+
+    This is the canonical action for both fault injection (correct → reversed)
+    and repair (reversed → correct) of a reversed-polarity battery fault.
+    Requires REACHABLE affordance on the VoltageSource.
+
+    targets: {"subject": <VoltageSource>}
+    """
+
+    action_id = "reverse_battery"
+    description = "Reverse the polarity of a battery (install it backwards or correct it)."
+    cost = ActionCost(time=30.0)
+    mutates_graph = True
+
+    def check_preconditions(self, targets, context):
+        if "subject" not in targets:
+            return False, "No 'subject' target provided."
+        return True, ""
+
+    def execute(self, targets, graph, context, last_result):
+        comp = targets["subject"]
+        nominal_v = comp.nominal_parameters()["voltage"]
+        current_v = comp.current_parameters()["voltage"]
+        new_v = -current_v
+        if new_v == nominal_v:
+            comp.clear_fault()
+        else:
+            comp.apply_fault({"voltage": new_v})
+        return ActionResult(
+            message=f"Battery {comp.display_name!r} polarity reversed (voltage now {new_v:.1f} V)."
+        )
+
+
+class SwapCablePolarities(CompositeAction):
+    """
+    Swap the connections of a specified port between two cables.
+
+    Models crossing (or uncrossing) two cables: e.g. the positive input of
+    cable A ends up connected to the node previously held by cable B, and
+    vice versa.  Calling it twice restores the original wiring.
+
+    Implemented as a CompositeAction of 2 × DisconnectCable + 2 × ReconnectCable,
+    so its cost is automatically 4 × 40s = 160s.
+
+    targets: {"cable_a": <Cable>, "cable_b": <Cable>}
+    """
+
+    action_id = "swap_cable_polarities"
+    description = "Swap the connections of a specified port between two cables (cross/uncross)."
+
+    def __init__(self, cable_a_id: str = "", cable_b_id: str = "", port_name: str = "p"):
+        self.cable_a_id = cable_a_id
+        self.cable_b_id = cable_b_id
+        self.port_name = port_name
+        self._cable_a = None
+        self._cable_b = None
+
+    def check_preconditions(self, targets, context):
+        self._cable_a = targets.get("cable_a")
+        self._cable_b = targets.get("cable_b")
+        if self._cable_a is None or self._cable_b is None:
+            return False, "Both 'cable_a' and 'cable_b' targets are required."
+        from diagnosable_systems_simulation.actions.preconditions import AffordanceRequirement, PreconditionChecker
+        ok, failures = PreconditionChecker.check_all(
+            [
+                AffordanceRequirement("cable_a", Affordance.DETACHABLE),
+                AffordanceRequirement("cable_b", Affordance.DETACHABLE),
+            ],
+            targets, context,
+        )
+        return ok, "; ".join(failures)
+
+    def execute(self, targets, graph, context, last_result):
+        self._cable_a = targets.get("cable_a")
+        self._cable_b = targets.get("cable_b")
+        return super().execute(targets, graph, context, last_result)
+
+    @property
+    def sub_actions(self):
+        a, b, pn = self._cable_a, self._cable_b, self.port_name
+        node_a = a.port(pn).node_id
+        node_b = b.port(pn).node_id
+        return [
+            (DisconnectCable(port_names=[pn]), {"subject": a}),
+            (DisconnectCable(port_names=[pn]), {"subject": b}),
+            (ReconnectCable({pn: node_b}),     {"subject": a}),
+            (ReconnectCable({pn: node_a}),     {"subject": b}),
+        ]

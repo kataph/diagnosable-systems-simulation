@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from diagnosable_systems_simulation.actions.base import Action, ActionCost, ActionResult
+from diagnosable_systems_simulation.actions.base import Action, ActionCost, ActionResult, CompositeAction
 from diagnosable_systems_simulation.actions.observation import ObservationRecord, observe_component
 from diagnosable_systems_simulation.actions.preconditions import (
     AffordanceRequirement, ToolRequirement, PreconditionChecker
@@ -287,6 +287,79 @@ class CloseSwitch(Action):
         return ActionResult(message=f"Switch {sw.display_name!r} is now closed.")
 
 
+class TestSwitch(CompositeAction):
+    """
+    Full functional test of a switch: close it, measure continuity, open it,
+    measure continuity again.
+
+    Expected result: closed → conducting (nominal R), open → open circuit.
+    Any deviation flags the switch as faulty.
+
+    Cost is derived from sub-actions: 2 × CloseSwitch/OpenSwitch (10s each)
+    + 2 × TestContinuity (20s each) = 60s total, plus multimeter equipment.
+
+    Requires TOGGLABLE + REACHABLE + MEASURABLE affordances and "multimeter"
+    in tools_in_hand.
+
+    targets: {"subject": <Switch component>}
+    """
+
+    action_id = "test_switch"
+    description = "Full functional test of a switch: continuity in closed and open state."
+    cost = ActionCost(time=60.0, equipment=["multimeter"])
+
+    @property
+    def sub_actions(self):
+        sw = self._subject
+        return [
+            (CloseSwitch(),      {"subject": sw}),
+            (TestContinuity(),   {"subject": sw}),
+            (OpenSwitch(),       {"subject": sw}),
+            (TestContinuity(),   {"subject": sw}),
+        ]
+
+    def check_preconditions(self, targets, context):
+        self._subject = targets.get("subject")
+        if self._subject is None:
+            return False, "No 'subject' target provided."
+        ok, failures = PreconditionChecker.check_all(
+            [
+                AffordanceRequirement("subject", Affordance.TOGGLABLE),
+                AffordanceRequirement("subject", Affordance.REACHABLE),
+                AffordanceRequirement("subject", Affordance.MEASURABLE),
+                ToolRequirement("multimeter"),
+            ],
+            targets, context,
+        )
+        return ok, "; ".join(failures)
+
+    def execute(self, targets, graph, context, last_result):
+        self._subject = targets.get("subject")
+        result = super().execute(targets, graph, context, last_result)
+        sw = self._subject
+        msgs = result.message.split(" | ")
+        closed_status = _parse_continuity_status(msgs[1])
+        open_status = _parse_continuity_status(msgs[3])
+        closed_ok = closed_status in ("nominal", "short circuit")
+        open_ok = open_status == "open circuit"
+        if closed_ok and open_ok:
+            verdict = "PASS — switch conducts when closed and isolates when open."
+        elif not closed_ok and not open_ok:
+            verdict = f"FAIL — does not conduct when closed ({closed_status}) and does not isolate when open ({open_status})."
+        elif not closed_ok:
+            verdict = f"FAIL — does not conduct when closed ({closed_status})."
+        else:
+            verdict = f"FAIL — does not isolate when open ({open_status})."
+        return ActionResult(message=f"TestSwitch {sw.display_name!r}: {verdict}")
+
+
+def _parse_continuity_status(continuity_message: str) -> str:
+    for keyword in ("open circuit", "short circuit", "degraded", "nominal"):
+        if keyword in continuity_message:
+            return keyword
+    return "unknown"
+
+
 class ReplaceComponent(Action):
     """
     Replace a faulty component with a fresh one (restores nominal parameters).
@@ -423,6 +496,7 @@ class RestoreEnclosure(Action):
         from diagnosable_systems_simulation.world.components import PhysicalEnclosure
         enc: PhysicalEnclosure = targets["subject"]
         enc.is_inverted = False
+        enc.is_rotated = False
         return ActionResult(message=f"Enclosure {enc.display_name!r} restored to normal orientation.")
 
 
@@ -431,14 +505,15 @@ class RotateEnclosure(Action):
     Rotate or move an enclosure to reposition it (e.g. shift a module out of
     line-of-sight of another component).
 
-    Unlike ``InvertEnclosure`` (which flips a cube for inspection access),
-    this action models a deliberate repositioning — rotating or sliding a
-    module so that its contents no longer face a sensor or another module.
+    Unlike ``InvertEnclosure`` (which flips a cube upside-down for inspection
+    access), this action models a deliberate repositioning — rotating or sliding
+    a module so that its contents no longer face a sensor or another module.
+    The enclosure contents remain enclosed and unreachable after rotation.
 
-    In the simulation this sets ``is_inverted = True`` on the enclosure,
-    which the ``AmbientFeedbackCoupling`` interprets as the optical path
-    being broken.  The enclosure can be returned to its original position
-    with ``RestoreEnclosure``.
+    Sets ``is_rotated = True`` on the enclosure, which couplings such as
+    ``AmbientFeedbackCoupling`` interpret as the optical path being broken.
+    The enclosure can be returned to its original position with
+    ``RestoreEnclosure``.
 
     Requires REACHABLE and MOVABLE affordance on the enclosure.
 
@@ -447,7 +522,7 @@ class RotateEnclosure(Action):
 
     action_id = "rotate_enclosure"
     description = "Rotate or move an enclosure to reposition it (e.g. break a line-of-sight coupling)."
-    cost = ActionCost(time=15.0)
+    cost = ActionCost(time=10.0)
 
     def check_preconditions(self, targets, context):
         ok, failures = PreconditionChecker.check_all(
@@ -462,7 +537,7 @@ class RotateEnclosure(Action):
     def execute(self, targets, graph, context, last_result):
         from diagnosable_systems_simulation.world.components import PhysicalEnclosure
         enc: PhysicalEnclosure = targets["subject"]
-        enc.is_inverted = True
+        enc.is_rotated = True
         return ActionResult(message=f"Enclosure {enc.display_name!r} has been rotated/moved to a new position.")
 
 
@@ -603,7 +678,7 @@ class AdjustPotentiometer(Action):
 
     action_id = "adjust_potentiometer"
     description = "Adjust the wiper position of a potentiometer."
-    cost = ActionCost(time=20.0)
+    cost = ActionCost(time=15.0)
     mutates_graph = True
 
     def __init__(self, new_position: float):
@@ -767,7 +842,7 @@ class TestPathContinuity(Action):
         "Measure the Thevenin resistance between a terminal of one component "
         "and a terminal of another (point-to-point continuity test)."
     )
-    cost = ActionCost(time=30.0, equipment=["multimeter"])
+    cost = ActionCost(time=45.0, equipment=["multimeter"])
 
     def __init__(self, source_port: str = "", sink_port: str = ""):
         self.source_port = source_port
@@ -955,7 +1030,7 @@ class InspectConnections(Action):
 
     action_id = "inspect_connections"
     description = "Inspect which cables are physically connected to each port."
-    cost = ActionCost(time=10.0)
+    cost = ActionCost(time=15.0)
 
     def check_preconditions(self, targets, context):
         ok, failures = PreconditionChecker.check_all(
@@ -1071,6 +1146,12 @@ class VerifyRepair(Action):
     a no-op: the service agent reads the resolved ``subject`` ID from the
     parsed action entry and calls ``DiagnosableSystem.test_repair()``.
 
+    Cost is intentionally zero here.  The real repair cost is computed by
+    ``DiagnosableSystem.apply_repairs()`` from the actual actions performed
+    (ReconnectCable = 40s, component replacement = 120s, etc.) and attributed
+    by the service agent in ``verify_hypothesis()``.  Assigning a fixed cost
+    to VerifyRepair would double-count or misrepresent the repair effort.
+
     targets: {"subject": <any Component>}
     """
 
@@ -1079,17 +1160,14 @@ class VerifyRepair(Action):
         "Identify the component that the technician suspects is faulty and "
         "mark it for hypothesis verification (repair-and-test)."
     )
-    cost = ActionCost(time=120.0)
+    cost = ActionCost(time=0.0)
 
     def check_preconditions(self, targets, context):
         return True, ""
 
     def execute(self, targets, graph, context, last_result):
-        from diagnosable_systems_simulation.world.components import Cable
         comp = targets.get("subject")
         name = comp.display_name if comp is not None else "unknown"
-        if isinstance(comp, Cable):
-            self.cost = ActionCost(time=30.0)
         return ActionResult(message=f"Marked '{name}' as hypothesis-verification target.")
 
 
@@ -1115,7 +1193,7 @@ class MoveLED(Action):
         "If the target slot already has a LED the two are swapped; "
         "if the target slot is empty the LED and its series resistor are moved."
     )
-    cost = ActionCost(time=60.0)
+    cost = ActionCost(time=30.0)
     mutates_graph = True
 
     def __init__(self, target_module_id: str = ""):
