@@ -264,7 +264,7 @@ class DiagnosableSystem:
     # ------------------------------------------------------------------
 
     # Component attributes that hold mutable non-overlay state.
-    _STATEFUL_ATTRS: tuple[str, ...] = ("is_closed", "is_inverted", "is_open", "is_blown")
+    _STATEFUL_ATTRS: tuple[str, ...] = ("is_closed", "is_inverted", "is_rotated", "is_open", "is_blown")
 
     def snapshot(self) -> dict:
         """
@@ -309,6 +309,7 @@ class DiagnosableSystem:
                 for cid, c in comps.items()
             },
             "circuit_only_ids": circuit_only_ids,
+            "_runner_couplings": list(self._runner.couplings),
         }
 
     def restore_snapshot(self, snap: dict, exclude_ids: "set[str] | None" = None) -> None:
@@ -400,13 +401,20 @@ class DiagnosableSystem:
             except (KeyError, Exception):
                 pass
 
+        # --- Restore couplings list --------------------------------------
+        if "_runner_couplings" in snap:
+            self._runner.couplings = list(snap["_runner_couplings"])
+            for c in self._runner.couplings:
+                if hasattr(c, "reset"):
+                    c.reset()
+
         self.simulate()
 
     # ------------------------------------------------------------------
     # Hypothesis-verification helper
     # ------------------------------------------------------------------
 
-    def apply_repairs(self, component_ids: "set[str]") -> None:
+    def apply_repairs(self, component_ids: "set[str]") -> "ActionCost":
         """
         Physically repair components in the live circuit without simulating
         or restoring any snapshot.
@@ -419,12 +427,22 @@ class DiagnosableSystem:
             after a polarity-swap fault injection).
           - Components with a fault overlay: the overlay is cleared.
 
+        Returns the total ``ActionCost`` of the repairs performed, computed
+        from the canonical action costs (ReconnectCable = 40s per cable,
+        component replacement = 120s per component).  Callers that attribute
+        hypothesis-verification cost should use this value rather than any
+        fixed overhead.
+
         Use this to persist confirmed repairs between partial hypothesis
         verifications, so that ``restore_snapshot(exclude_ids=repaired)``
         leaves those components in the repaired state rather than the
         fault state they were in when ``test_repair()`` last exited.
         """
+        from diagnosable_systems_simulation.actions.base import ActionCost
         from diagnosable_systems_simulation.world.components import Cable
+        _RECONNECT_COST = ActionCost(time=10.0)   # mirrors ReconnectCable.cost
+        _REPLACE_COST   = ActionCost(time=120.0)  # mirrors ReplaceComponent default
+        total = ActionCost()
         for cid in component_ids:
             try:
                 comp = self.component(cid)
@@ -436,23 +454,25 @@ class DiagnosableSystem:
                     port = comp.port(port_name)
                     if not port.is_connected():
                         self._graph.reconnect_port(cid, port_name, node_id)
+                        total = total + _RECONNECT_COST
                     elif port.node_id != node_id:
                         # Connected to wrong net (crossed-cable fault).
                         self._graph.disconnect_port(cid, port_name)
                         self._graph.reconnect_port(cid, port_name, node_id)
+                        total = total + _RECONNECT_COST
             to_delete = []
-            if (detached := getattr(comp, "_detached_cable_ports", {})): 
+            if (detached := getattr(comp, "_detached_cable_ports", {})):
                 for p_port, (cid, c_port, nid) in detached.items():
                     cable = self.component(cid)
                     self._graph.reconnect_port(cable.component_id, c_port, nid)
                     cable.affordances.remove(Affordance.RECONNECTABLE)
                     to_delete.append(p_port)
+                    total = total + _RECONNECT_COST
                 for p in to_delete:
                     del detached[p]
 
                 if not comp._detached_cable_ports:
                     comp.affordances.remove(Affordance.RECONNECTABLE)
-                    # Optional: remove the empty attribute to keep objects clean
                     del comp._detached_cable_ports
             if comp._fault_overlay:
                 # If this component was part of a short-circuit fault, remove the
@@ -464,6 +484,8 @@ class DiagnosableSystem:
                     except (KeyError, Exception):
                         pass  # already removed by the other cable in the pair
                 comp._fault_overlay.clear()
+                total = total + _REPLACE_COST
+        return total
 
     def test_repair(
         self,
@@ -512,18 +534,29 @@ class DiagnosableSystem:
         if fault_snapshot is not None:
             self.restore_snapshot(fault_snapshot, exclude_ids=already)
 
-        # 2. Apply repairs (shared logic with apply_repairs, including short removal)
+        # 2. Strip LooseConnectionCouplings for the repaired components so the
+        # hypothetical repair simulation is not sabotaged by the intermittent
+        # fault still firing.  They are restored after restore_snapshot() so
+        # test_repair() remains non-destructive — the coupling IS the fault.
+        from diagnosable_systems_simulation.electrical_simulation.couplings import LooseConnectionCoupling
+        loose_removed = [
+            c for c in self._runner.couplings
+            if isinstance(c, LooseConnectionCoupling) and c.component_id in component_ids
+        ]
+        self._runner.couplings = [c for c in self._runner.couplings if c not in loose_removed]
+
+        # 2b. Apply repairs (shared logic with apply_repairs, including short removal)
         self.apply_repairs(component_ids)
 
-        # 2b. For PhysicalEnclosure components: "repairing" means repositioning
-        # (rotating/moving) so any coupling that checks is_inverted sees the
+        # 2c. For PhysicalEnclosure components: "repairing" means repositioning
+        # (rotating/moving) so any coupling that checks is_rotated sees the
         # enclosure as displaced.  restore_snapshot undoes this automatically
-        # since is_inverted is listed in _STATEFUL_ATTRS.
+        # since is_rotated is listed in _STATEFUL_ATTRS.
         for cid in component_ids:
             try:
                 comp = self._kg.get_entity(cid)
                 if isinstance(comp, PhysicalEnclosure):
-                    comp.is_inverted = True
+                    comp.is_rotated = True
             except KeyError:
                 pass
 
@@ -565,6 +598,9 @@ class DiagnosableSystem:
         # 5. Restore back to fault state — caller decides what to persist
         if fault_snapshot is not None:
             self.restore_snapshot(fault_snapshot, exclude_ids=already)
+
+        # Restore the loose couplings now that fault state is back
+        self._runner.couplings.extend(loose_removed)
 
         return lamp_on
 

@@ -79,7 +79,7 @@ class LampToLightSensorCoupling(PhysicalCoupling):
         enclosures = context.extra.get("enclosures", {})
         for eid in self.barrier_enclosure_ids:
             enc = enclosures.get(eid)
-            if enc is not None and not enc.is_open and not enc.is_inverted:
+            if enc is not None and not enc.is_open and not enc.is_rotated:
                 return True
         return False
 
