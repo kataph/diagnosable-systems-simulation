@@ -125,7 +125,7 @@ class AmbientFeedbackCoupling(PhysicalCoupling):
 
     def _feedback_blocked(self) -> bool:
         """Return True if any shielding enclosure has been rotated/moved."""
-        return any(enc.is_inverted for enc in self.shielding_enclosures)
+        return any(enc.is_rotated for enc in self.shielding_enclosures)
 
     def apply(
         self,

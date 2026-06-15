@@ -488,11 +488,15 @@ class PhysicalEnclosure(Component):
     -----
     is_inverted
         True while the enclosure is upside-down (bottom face open), making
-        internal components visible.
+        internal components visible and reachable.
+    is_rotated
+        True while the enclosure has been rotated/moved out of its nominal
+        position (e.g. to break a line-of-sight optical path).  Does NOT
+        expose internal components — contents remain enclosed and unreachable.
 
     Affordances
     -----------
-    MOVABLE    — can be lifted and inverted (exposes bottom face).
+    MOVABLE    — can be lifted, inverted, or rotated.
     OBSERVABLE — always visible from the outside.
     """
 
@@ -504,6 +508,7 @@ class PhysicalEnclosure(Component):
         position: Optional[Position] = None,
     ):
         self.is_inverted: bool = False
+        self.is_rotated: bool = False
         self.contained_component_ids: list[str] = list(contained_component_ids or [])
         super().__init__(
             component_id=component_id,

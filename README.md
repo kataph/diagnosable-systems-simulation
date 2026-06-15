@@ -5,10 +5,10 @@ A Python framework for building, simulating, and diagnosing **physical systems**
 The framework is structured in four layers:
 
 ```
-world/               — components, ports, affordances, spatial model
+world/                  — components, ports, affordances, spatial model
 electrical_simulation/  — circuit graph, MNA solver, PySpice/ngspice backend
-actions/             — diagnostic and fault-injection actions
-systems/             — concrete system definitions
+actions/                — diagnostic and fault-injection actions
+systems/                — concrete system definitions
 ```
 
 A companion package [`nl_interface`](nl_interface/) provides a natural-language interface on top, powered by an LLM.
@@ -18,10 +18,9 @@ A companion package [`nl_interface`](nl_interface/) provides a natural-language 
 ## Installation
 
 ```bash
-pip install diagnosable-systems-simulation          # core only (numpy)
-pip install "diagnosable-systems-simulation[spice]" # + PySpice/ngspice backend
-pip install "diagnosable-systems-simulation[llm]"   # + OpenAI / Anthropic (for nl_interface)
-pip install "diagnosable-systems-simulation[all]"   # everything
+pip install "diagnosable-systems-simulation[spice]"      # simulation only (PySpice/ngspice)
+pip install "diagnosable-systems-simulation[llm]"        # + OpenAI / Anthropic (for nl_interface)
+pip install "diagnosable-systems-simulation[all]"        # everything
 ```
 
 For development:
@@ -32,15 +31,18 @@ cd diagnosable-systems-simulation
 pip install -e ".[all]" --config-settings editable_mode=compat
 ```
 
+> **ngspice** must be installed separately and available on `PATH`.  
+> macOS: `brew install ngspice` · Linux: `apt install ngspice`
+
 ---
 
 ## Quick start
 
 ```python
 from diagnosable_systems_simulation.systems.three_cubes.factory import build_three_cubes_system
-from diagnosable_systems_simulation.electrical_simulation.backend.stub import StubBackend
+from diagnosable_systems_simulation.electrical_simulation.backend.spice import PySpiceBackend
 
-system = build_three_cubes_system(backend=StubBackend(), extra_tools={"multimeter"})
+system = build_three_cubes_system(backend=PySpiceBackend(), extra_tools={"multimeter"})
 result = system.simulate()
 print(result)                        # SimulationResult(nodes=14, converged=True, lit=[...])
 print(result.is_lit("main_bulb"))    # True
@@ -71,29 +73,34 @@ result = system.simulate()
 print(result.is_lit("main_bulb"))    # False
 ```
 
-### Simulation dump
+### Intermittent faults
 
 ```python
-from diagnosable_systems_simulation.utils.dump import dump_electrical, dump_state
+from diagnosable_systems_simulation.electrical_simulation.couplings import _add_loose_connection
 
-print(dump_electrical(system.last_result, system.graph))  # node voltages + branch currents
-print(dump_state(system))                                  # full per-component report
+_add_loose_connection(system, "psu_cable_pos", "p", p=0.5)
+# port disconnects randomly with probability p on each solver step
 ```
 
 ### Natural language interface
 
 ```python
-from nl_interface import run
+from nl_interface.interface import run
 
-narrative, cost = run("measure voltage at the main bulb", system)
-print(narrative)
+narrative, cost, entries, results = run(
+    "measure voltage at the main bulb",
+    system,
+    mode="collect_information",
+)
+print(narrative)   # plain-English summary of findings
+print(cost.time)   # estimated technician time in seconds
 ```
 
 ---
 
 ## The three-cubes system
 
-The included example system models a three-module lamp:
+The included example system models a three-module lamp assembly:
 
 - **PSU cube** — 12 V source, status LED, output cables
 - **Control cube** — on/off switch, polarity-indicator LED, interconnect cables
@@ -103,17 +110,24 @@ Pre-built fault scenarios (S0–S5) cover disconnected cables, burned bulbs, dep
 
 ---
 
-## Simulation backends
+## Simulation backend
 
 | Backend | Requires | Notes |
 |---|---|---|
-| `StubBackend` | numpy only | Fast MNA solver, good for testing |
 | `PySpiceBackend` | PySpice + ngspice | Full SPICE `.op` analysis |
+
+---
+
+## Action costs
+
+Each action carries an `ActionCost` (time in seconds, required equipment, consumed resources).
+See [`ACTION_COSTS.md`](ACTION_COSTS.md) for the full rationale table.
 
 ---
 
 ## Running tests
 
 ```bash
-pytest tests/test_simulation.py     # 48 tests, parametrized over both backends
+pytest tests/                        # full suite (~110 tests)
+SKIP_LLM_TESTS=0 pytest tests/       # include live LLM tests (requires API key)
 ```
