@@ -428,7 +428,7 @@ class DiagnosableSystem:
           - Components with a fault overlay: the overlay is cleared.
 
         Returns the total ``ActionCost`` of the repairs performed, computed
-        from the canonical action costs (ReconnectCable = 40s per cable,
+        from the canonical action costs (ReconnectCable = 10s per cable,
         component replacement = 120s per component).  Callers that attribute
         hypothesis-verification cost should use this value rather than any
         fixed overhead.

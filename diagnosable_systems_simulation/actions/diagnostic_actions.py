@@ -306,6 +306,8 @@ class TestSwitch(CompositeAction):
 
     action_id = "test_switch"
     description = "Full functional test of a switch: continuity in closed and open state."
+    # Hardcoded to match sub-action sum: CloseSwitch(10)+TestContinuity(20)+OpenSwitch(10)+TestContinuity(20)=60s.
+    # Cannot use CompositeAction.cost property because _subject is not bound at class definition time.
     cost = ActionCost(time=60.0, equipment=["multimeter"])
 
     @property
