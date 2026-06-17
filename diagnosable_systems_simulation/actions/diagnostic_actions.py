@@ -1096,12 +1096,19 @@ class InspectConnections(Action):
                     except (KeyError, AttributeError):
                         pass
 
-        # Build node → [cable_display_name, ...] index from the circuit graph
-        node_cables: dict[str, list[str]] = {}
+        # Build node → [cable_display_name, ...] and node → [component_display_name, ...]
+        # indexes from the circuit graph.
+        node_cables:     dict[str, list[str]] = {}
+        node_components: dict[str, list[str]] = {}
         for edge in graph.get_netlist():
-            if isinstance(edge.component, Cable):
-                for node_id in edge.port_nodes.values():
+            if edge.component is comp:
+                continue
+            is_cable = isinstance(edge.component, Cable)
+            for node_id in edge.port_nodes.values():
+                if is_cable:
                     node_cables.setdefault(node_id, []).append(edge.component.display_name)
+                else:
+                    node_components.setdefault(node_id, []).append(edge.component.display_name)
 
         lines = []
         for port in comp.ports:
@@ -1111,9 +1118,13 @@ class InspectConnections(Action):
                 record.add(f"port_{port.name}", "disconnected")
             else:
                 cables = node_cables.get(node_id, [])
-                cable_str = ", ".join(cables) if cables else "no cable"
-                lines.append(f"port '{port.name}': {cable_str}")
-                record.add(f"port_{port.name}", cable_str)
+                if cables:
+                    conn_str = ", ".join(cables)
+                else:
+                    neighbors = node_components.get(node_id, [])
+                    conn_str = ("directly wired to " + ", ".join(neighbors)) if neighbors else "no cable"
+                lines.append(f"port '{port.name}': {conn_str}")
+                record.add(f"port_{port.name}", conn_str)
 
         # Store IDs for cost reconstruction in nl_interface.
         if auto_inv_ids:
@@ -1570,3 +1581,19 @@ class DetachSequenceOfControlModulesAndAttachItToPowerAndLoad(Action):
 
 # Backward-compatible alias used by tests and imports written before the rename.
 TestControlSubchain = DetachSequenceOfControlModulesAndAttachItToPowerAndLoad
+
+# Import diagnostic cable connection actions from fault_actions.
+# DisconnectCable and ReconnectCable are legitimate diagnostic actions:
+# a technician needs to disconnect/reconnect cables to test and diagnose
+# the system, not just to repair it. Making them available in collect_information mode.
+from diagnosable_systems_simulation.actions.fault_actions import DisconnectCable, ReconnectCable
+
+__all__ = [
+    'ObserveComponent', 'MeasureVoltage', 'MeasureCurrent',
+    'OpenSwitch', 'CloseSwitch', 'TestSwitch',
+    'ReplaceComponent', 'InvertEnclosure', 'RestoreEnclosure', 'RotateEnclosure',
+    'OpenPeephole', 'ClosePeephole', 'OpenInspectionPanel', 'CloseInspectionPanel',
+    'AdjustPotentiometer', 'TestContinuity', 'TestPathContinuity', 'TestDiode',
+    'InspectConnections', 'VerifyRepair', 'SwapCablePolarities', 'ReverseBattery',
+    'TestControlSubchain', 'DisconnectCable', 'ReconnectCable',
+]

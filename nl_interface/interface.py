@@ -578,13 +578,16 @@ def _execute(entries: list[dict], system, allowed_actions: "set[str] | None" = N
 _verbalize_prompt_free ="""\
 You are going to receive a description of an action executed on a system by an engineer. The action is divided into 1 or more steps, together with the resulting step outcomes.
 You are to process the results and give feedback to engineer by summarizing diagnostic results in 1–3 plain sentences for the engineer.
-In this case, limit yourself strictly to the information in the user prompt — do not add opinions, causes, or extra remarks.
-Inthis case, also observe the following rule:
-Critical rule — polarity inversions:
+Limit yourself strictly to the information in the user prompt — do not add opinions, causes, diagnosis, interpretations, or extra remarks.
+Example BAD: "Measured resistance of 1,000,000,000 Ω, indicating that the filament is broken" (this is a diagnosis)
+Example GOOD: "Measured resistance of 1,000,000,000 Ω at the main lamp terminals" (this is data)
+
+Also observe the following rule:
+CRITICAL — polarity inversions:
 If a (+)-labeled cable or port is connected to a (−)-labeled cable or port (or vice versa), you MUST
 explicitly state this as a POLARITY INVERSION and name the affected cables. Do not describe such a
 connection as "correct" or "nominal". Example: "POLARITY INVERSION DETECTED: PSU Output Cable (+)
-is connected to Control Input Cable (−), and PSU Output Cable (−) is connected to Control Input Cable (+). 
+is connected to Control Input Cable (−), and PSU Output Cable (−) is connected to Control Input Cable (+).
 Of course, the presence of a small negative current in one cable, by itself, does not amount to polarity inversion. "
 """
 _verbalize_prompt_costrained ="""\
