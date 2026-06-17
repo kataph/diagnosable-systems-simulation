@@ -147,6 +147,12 @@ class SimulationRunner:
     ) -> SimulationResult:
         result: Optional[SimulationResult] = None
 
+        # Reset per-run state on all couplings (e.g. LooseConnectionCoupling
+        # uses this to ensure the coin is flipped exactly once per simulate()).
+        for coupling in self.couplings:
+            if hasattr(coupling, "_flipped_this_run"):
+                coupling._flipped_this_run = False
+
         for iteration in range(self.MAX_ITERATIONS):
             result = self.backend.solve(graph, self.logger)
 

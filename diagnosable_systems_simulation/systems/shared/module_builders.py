@@ -497,6 +497,7 @@ def create_load_module(x_left: float = 0.30, prefix: str = "") -> SimpleNamespac
         power_threshold=0.01,
         position=Position(x + 0.05, 0.05, 0.05),
         enclosure_id=cube_id,
+        is_indicator=True,
     )
     internal_bulb._nominal_observation_note = (
         "This lamp is connected in parallel with the main load and reflects voltage conditions across that branch."
@@ -958,6 +959,7 @@ def create_ambient_load_module(x_left: float = 0.30) -> SimpleNamespace:
         power_threshold=0.01,
         position=Position(x + 0.05, 0.05, 0.05),
         enclosure_id="cube_load",
+        is_indicator=True,
     )
     internal_bulb._nominal_observation_note = (
         "This lamp is connected in parallel with the main load and reflects voltage conditions across that branch."

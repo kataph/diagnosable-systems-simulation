@@ -144,15 +144,18 @@ class DiagnosableSystem:
 
     def is_system_nominal(self) -> bool:
         """
-        Return True if the current simulation result shows all nominal Bulbs lit.
+        Return True if the current simulation result shows all nominal Bulbs lit
+        AND there are no active LooseConnectionCouplings on the system.
 
-        This is the path-(ii) repair check: call it after any mutating action
-        (ReplaceComponent, ReconnectCable, …) to confirm the system is restored.
-        Unlike test_repair(), this does not re-simulate or touch any snapshot —
-        it reads _last_result as-is.
+        A loose connection is an intermittent fault: even if the last simulate()
+        happened to land on the "connected" coin flip, the system is not reliably
+        nominal as long as the coupling is present.
         """
         from diagnosable_systems_simulation.world.components import Bulb
+        from diagnosable_systems_simulation.electrical_simulation.couplings import LooseConnectionCoupling
         if self._last_result is None or not self._last_result.converged:
+            return False
+        if any(isinstance(c, LooseConnectionCoupling) for c in self._runner.couplings):
             return False
         nominal_bulbs = frozenset(
             cid for cid in self._nominal_emitting_light
@@ -308,6 +311,10 @@ class DiagnosableSystem:
                 cid: set(c.affordances._static)
                 for cid, c in comps.items()
             },
+            "dynamic_affordances": {
+                cid: set(c.affordances._dynamic)
+                for cid, c in comps.items()
+            },
             "circuit_only_ids": circuit_only_ids,
             "_runner_couplings": list(self._runner.couplings),
         }
@@ -388,6 +395,15 @@ class DiagnosableSystem:
             for a in snap_static - curr_static:
                 comp.affordances.add(a)
 
+            # --- Dynamic affordances (e.g. RECONNECTABLE added by DisconnectCable) ---
+            if "dynamic_affordances" in snap:
+                snap_dynamic = snap["dynamic_affordances"].get(cid, set())
+                curr_dynamic = set(comp.affordances._dynamic)
+                for a in curr_dynamic - snap_dynamic:
+                    comp.affordances._dynamic.discard(a)
+                for a in snap_dynamic - curr_dynamic:
+                    comp.affordances._dynamic.add(a)
+
         # --- Remove ghost circuit components added after the snapshot --------
         # These are components in _graph._edges that are not in the KG (e.g.
         # shorts inserted by short_ports diagnostic actions).  Any ghost that
@@ -403,7 +419,16 @@ class DiagnosableSystem:
 
         # --- Restore couplings list --------------------------------------
         if "_runner_couplings" in snap:
-            self._runner.couplings = list(snap["_runner_couplings"])
+            from diagnosable_systems_simulation.electrical_simulation.couplings import LooseConnectionCoupling
+            restored = [
+                c for c in snap["_runner_couplings"]
+                if not (
+                    isinstance(c, LooseConnectionCoupling)
+                    and exclude_ids is not None
+                    and c.component_id in exclude_ids
+                )
+            ]
+            self._runner.couplings = restored
             for c in self._runner.couplings:
                 if hasattr(c, "reset"):
                     c.reset()
@@ -485,6 +510,22 @@ class DiagnosableSystem:
                         pass  # already removed by the other cable in the pair
                 comp._fault_overlay.clear()
                 total = total + _REPLACE_COST
+
+        # Remove LooseConnectionCouplings for the repaired components and
+        # reconnect any port the coupling left dangling.
+        # A loose connection IS the fault — permanently gone after repair.
+        from diagnosable_systems_simulation.electrical_simulation.couplings import LooseConnectionCoupling
+        loose_to_remove = [
+            c for c in self._runner.couplings
+            if isinstance(c, LooseConnectionCoupling) and c.component_id in component_ids
+        ]
+        self._runner.couplings = [c for c in self._runner.couplings if c not in loose_to_remove]
+        for c in loose_to_remove:
+            if c._currently_disconnected and c._saved_node is not None:
+                self._graph.reconnect_port(c.component_id, c.port_name, c._saved_node)
+                c._currently_disconnected = False
+                total = total + _RECONNECT_COST
+
         return total
 
     def test_repair(
@@ -515,18 +556,19 @@ class DiagnosableSystem:
         from diagnosable_systems_simulation.world.components import Bulb, Cable, PhysicalEnclosure
 
         fault_snapshot = self._fault_snapshot
-        # Only check main load Bulbs — indicator LEDs are accessories and may
-        # have been deliberately removed, so including them would permanently
-        # prevent test_repair from ever returning True.
-        def _is_bulb(cid: str) -> bool:
+        # Only check main load Bulbs — indicator bulbs (is_indicator=True) and
+        # deliberately removed components must not block test_repair from
+        # returning True when the primary load is restored.
+        def _is_main_bulb(cid: str) -> bool:
             try:
-                return isinstance(self._kg.get_entity(cid), Bulb)
+                comp = self._kg.get_entity(cid)
+                return isinstance(comp, Bulb) and not getattr(comp, "is_indicator", False)
             except KeyError:
                 return False  # component was physically removed
 
         nominal_lit: "frozenset[str]" = frozenset(
             cid for cid in self._nominal_emitting_light
-            if _is_bulb(cid)
+            if _is_main_bulb(cid)
         )
         already = already_repaired_ids or set()
 
@@ -544,6 +586,14 @@ class DiagnosableSystem:
             if isinstance(c, LooseConnectionCoupling) and c.component_id in component_ids
         ]
         self._runner.couplings = [c for c in self._runner.couplings if c not in loose_removed]
+
+        # If the coupling left the port disconnected (new per-run semantics hold
+        # the open state across the simulate() inside restore_snapshot), reconnect
+        # it now using the coupling's own saved node before apply_repairs runs.
+        for c in loose_removed:
+            if c._currently_disconnected and c._saved_node is not None:
+                self._graph.reconnect_port(c.component_id, c.port_name, c._saved_node)
+                c._currently_disconnected = False
 
         # 2b. Apply repairs (shared logic with apply_repairs, including short removal)
         self.apply_repairs(component_ids)
@@ -572,6 +622,16 @@ class DiagnosableSystem:
             and nominal_lit.issubset(result.emitting_light)
         )
 
+        # 4a. Loose-connection guard: if any LooseConnectionCoupling was NOT
+        # removed (i.e. its component was not among the repaired candidates),
+        # the fault is still active and the lamp being on is a lucky random draw.
+        # Suppress the positive result in that case.
+        if lamp_on and any(
+            isinstance(c, LooseConnectionCoupling)
+            for c in self._runner.couplings
+        ):
+            lamp_on = False
+
         # 4b. Bypass guard: if the lamp is on, verify it is controlled by the
         # switch chain and not by a diagnostic bypass (e.g. a residual short).
         # Pick one closed, manually-operated Switch, open it, re-simulate, and
@@ -597,10 +657,12 @@ class DiagnosableSystem:
 
         # 5. Restore back to fault state — caller decides what to persist
         if fault_snapshot is not None:
+            # restore_snapshot already restores _runner.couplings from the snapshot,
+            # so do NOT extend — that would add duplicate LooseConnectionCouplings.
             self.restore_snapshot(fault_snapshot, exclude_ids=already)
-
-        # Restore the loose couplings now that fault state is back
-        self._runner.couplings.extend(loose_removed)
+        else:
+            # No snapshot: restore the stripped couplings manually.
+            self._runner.couplings.extend(loose_removed)
 
         return lamp_on
 

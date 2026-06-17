@@ -308,10 +308,15 @@ class PySpiceBackend(SimulationBackend):
             circuit.R(f"_rled_{cid}", mid_node, nn(pnodes["cathode"]), r_series)
 
         elif isinstance(comp, Diode):
-            vf = params.get("forward_voltage", 0.7)
-            model_name = f"D_{cid}"
-            circuit.model(model_name, "D", IS=1e-14, N=1.0, VJ=vf)
-            circuit.D(cid, nn(pnodes["anode"]), nn(pnodes["cathode"]), model=model_name)
+            # If a fault overlay sets 'resistance', model as a resistor (open/short fault).
+            fault_r = params.get("resistance")
+            if fault_r is not None:
+                circuit.R(cid, nn(pnodes["anode"]), nn(pnodes["cathode"]), fault_r)
+            else:
+                vf = params.get("forward_voltage", 0.7)
+                model_name = f"D_{cid}"
+                circuit.model(model_name, "D", IS=1e-14, N=1.0, VJ=vf)
+                circuit.D(cid, nn(pnodes["anode"]), nn(pnodes["cathode"]), model=model_name)
 
         elif isinstance(comp, Potentiometer):
             total_r = params.get("total_resistance", 1000.0) or 1000.0

@@ -95,3 +95,5 @@ def _add_loose_connection(
     coupling = LooseConnectionCoupling(component_id, port_name, p=p)
     sys._runner.couplings.append(coupling)
     sys.context.extra["has_loose_connection"] = True
+    loose_ids = sys.context.extra.setdefault("loose_component_ids", set())
+    loose_ids.add(component_id)

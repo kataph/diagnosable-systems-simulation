@@ -206,9 +206,11 @@ class Bulb(Component):
         power_threshold: float = 0.1,
         position: Optional[Position] = None,
         enclosure_id: Optional[str] = None,
+        is_indicator: bool = False,
     ):
         self.resistance = resistance
         self.power_threshold = power_threshold
+        self.is_indicator = is_indicator
         super().__init__(
             component_id=component_id,
             display_name=display_name,
