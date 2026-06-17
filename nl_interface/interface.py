@@ -103,7 +103,7 @@ _REGISTRY: dict[str, tuple] = {
         "port_names": "list[str] — port names to disconnect, e.g. ['n']; null = all ports",
     }),
     "reconnect_cable":     (ReconnectCable,     {
-        "connections": "dict[str, str] — optional: maps port_name to node_id; omit to restore original wiring",
+        "connections": "dict[str, str] — ALWAYS OMIT THIS PARAMETER; the system restores original wiring automatically",
     }),
     "degrade_component":   (DegradeComponent,   {
         "degradation": "dict — parameter overrides, e.g. {'resistance': 1e9} or {'voltage': 0.0}",
@@ -247,9 +247,10 @@ Plural / multi-component instructions:
 - Never emit a “global” action that lacks the required component fields.
 
 Component-matching for plural phrases:
-- When a noun class is used ("cables", "LEDs", "switches"), map it to all system components whose identifiers contain that class name (case-insensitive substring match).
+- When a noun class is used (“cables”, “LEDs”, “switches”), map it to all system components whose identifiers contain that class name (case-insensitive substring match).
 - If an instruction is ambiguous but clearly refers to a category (e.g., “check all connections”), infer the category and list all components of that type.
-- If no component matches the noun, return an empty JSON list.
+- If the instruction describes a recognizable action but the named component or device does not appear in the system component list (e.g. “wall wart”, “external power source”, “mains outlet”), return [{“action_id”: “_no_component_match”}] instead of an empty list.
+- If the instruction does not correspond to any known action type at all, return an empty JSON list [].
 
 Return format:
 - Always return a JSON array.
@@ -588,11 +589,12 @@ Example GOOD: "Measured resistance of 1,000,000,000 Ω at the main lamp terminal
 
 Also observe the following rule:
 CRITICAL — polarity inversions:
-If a (+)-labeled cable or port is connected to a (−)-labeled cable or port (or vice versa), you MUST
-explicitly state this as a POLARITY INVERSION and name the affected cables. Do not describe such a
-connection as "correct" or "nominal". Example: "POLARITY INVERSION DETECTED: PSU Output Cable (+)
-is connected to Control Input Cable (−), and PSU Output Cable (−) is connected to Control Input Cable (+).
-Of course, the presence of a small negative current in one cable, by itself, does not amount to polarity inversion. "
+If a (+)-labeled cable shares a circuit node (is directly connected) with a (−)-labeled cable, you MUST explicitly state this as a POLARITY INVERSION and name the affected cables. Do not describe such a connection as "correct" or "nominal". Example: "POLARITY INVERSION DETECTED: PSU Output Cable (+) is connected to Control Input Cable (−), and PSU Output Cable (−) is connected to Control Input Cable (+)."
+IMPORTANT — what is NOT a polarity inversion:
+- A switch, relay, or other component having a (+)-labeled cable on one port and another (+)-labeled cable on the other port is CORRECT — the component simply sits in series on that rail.
+- Two cables with the SAME polarity label connecting output-to-input (e.g. "Control Output Cable (+)" port 'n' connected to "Load Input Cable (+)" port 'p') is CORRECT series topology — the output end of one cable feeds the input end of the next. This is NEVER a polarity inversion. A polarity inversion only occurs when a (+)-labeled cable is on the same node as a (−)-labeled cable.
+- A (+)-labeled cable measuring high voltage (near supply voltage) and a (−)-labeled cable measuring low voltage (near 0 V) is CORRECT and nominal — do NOT flag this as a polarity inversion. A voltage-based inversion would be the opposite: high voltage on a (−)-labeled cable or near-zero voltage on a (+)-labeled cable.
+Of course, the presence of a small negative current in one cable, by itself, does not amount to polarity inversion.
 """
 _verbalize_prompt_costrained ="""\
 You are going to receive a description of an action executed on a system by an engineer. The action is divided into 1 or more steps, together with the resulting step outcomes.
@@ -662,13 +664,24 @@ def run(text: str, system: DiagnosableSystem, model: str = MODEL, mode: Literal[
     
     entries = _parse(text, system, model, allowed_actions, _logger)
 
-    if not entries:
-        base = (
-            "The requested action could not be mapped to any recognized "
-            "diagnostic operation. Only actions from the available action "
-            "list are supported (e.g. measure_voltage, test_continuity, "
-            "inspect_connections, verify_repair, …)."
-        )
+    _no_component_match = (
+        len(entries) == 1 and entries[0].get("action_id") == "_no_component_match"
+    )
+    if not entries or _no_component_match:
+        if _no_component_match:
+            base = (
+                "The action was understood but the target component or device "
+                "could not be identified in this system. Try rephrasing using "
+                "the name of a specific component visible in the system "
+                "(e.g. the battery, a cable, an enclosure, or a module)."
+            )
+        else:
+            base = (
+                "The requested action could not be mapped to any recognized "
+                "diagnostic operation. Only actions from the available action "
+                "list are supported (e.g. measure_voltage, test_continuity, "
+                "inspect_connections, verify_repair, …)."
+            )
         # If there are reporting requirements (e.g. ANOMALOUS/NOMINAL verdict),
         # honour them so that callers depending on the verdict token do not fail.
         if reporting_requirements:
@@ -681,7 +694,7 @@ def run(text: str, system: DiagnosableSystem, model: str = MODEL, mode: Literal[
             )
         else:
             narrative = base
-        return narrative, ActionCost(), entries, []
+        return narrative, ActionCost(), [], []
 
     if _logger:
         _logger.debug(f"_parse output: {entries}")

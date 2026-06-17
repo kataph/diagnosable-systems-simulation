@@ -8,7 +8,7 @@ from diagnosable_systems_simulation.actions.preconditions import (
 from diagnosable_systems_simulation.world.affordances import Affordance
 
 
-def _nearby_anomalies(comp, graph) -> list[str]:
+def _nearby_anomalies(comp, graph, loose_component_ids: "set[str] | None" = None) -> list[str]:
     """
     Return human-readable anomaly strings for components directly adjacent
     (sharing a circuit node) to *comp* that are in an abnormal state a
@@ -17,12 +17,18 @@ def _nearby_anomalies(comp, graph) -> list[str]:
     Currently detects:
       • Cables with a floating port whose ``_orig_connections`` pointed to a
         node of *comp* — i.e. a cable end that was plugged into this
-        component's terminal but has since been disconnected.
+        component's terminal but has since been disconnected (hard disconnect)
+        or has a loose/intermittent connection.
+
+    Pass ``loose_component_ids`` (set of component IDs that carry a
+    LooseConnectionCoupling) so the message can say "loose connection" instead
+    of "disconnected end" for intermittent faults.
 
     Designed to be extended with further anomaly checks as needed.
     """
     from diagnosable_systems_simulation.world.components import Cable
 
+    loose_ids = loose_component_ids or set()
     comp_nodes = {p.node_id for p in comp.ports if p.is_connected()}
     anomalies: list[str] = []
     seen: set[str] = set()
@@ -33,7 +39,7 @@ def _nearby_anomalies(comp, graph) -> list[str]:
             continue
         seen.add(neighbor.component_id)
 
-        # --- Check: disconnected cable end adjacent to comp ---
+        # --- Check: disconnected/loose cable end adjacent to comp ---
         # Triggers only if the cable's disconnected port was originally attached
         # to one of comp's own terminals (direct adjacency). One-hop adjacency
         # (cable's live end shares a node with comp) is intentionally excluded:
@@ -52,18 +58,33 @@ def _nearby_anomalies(comp, graph) -> list[str]:
                         if orig_node in e.port_nodes.values()
                         and e.component.component_id != neighbor.component_id
                     ]
-                    if connected_names:
-                        conn_str = ", ".join(f"'{n}'" for n in connected_names)
-                        msg = (
-                            f"cable '{neighbor.display_name}' has a disconnected end "
-                            f"(port '{port.name}' is floating; "
-                            f"originally electrically connected to {conn_str})"
-                        )
+                    is_loose = neighbor.component_id in loose_ids
+                    if is_loose:
+                        if connected_names:
+                            conn_str = ", ".join(f"'{n}'" for n in connected_names)
+                            msg = (
+                                f"cable '{neighbor.display_name}' has a loose connection "
+                                f"(port '{port.name}' is intermittently disconnected; "
+                                f"originally electrically connected to {conn_str})"
+                            )
+                        else:
+                            msg = (
+                                f"cable '{neighbor.display_name}' has a loose connection "
+                                f"(port '{port.name}' is intermittently disconnected)"
+                            )
                     else:
-                        msg = (
-                            f"cable '{neighbor.display_name}' has a disconnected end "
-                            f"(port '{port.name}' is floating)"
-                        )
+                        if connected_names:
+                            conn_str = ", ".join(f"'{n}'" for n in connected_names)
+                            msg = (
+                                f"cable '{neighbor.display_name}' has a disconnected end "
+                                f"(port '{port.name}' is floating; "
+                                f"originally electrically connected to {conn_str})"
+                            )
+                        else:
+                            msg = (
+                                f"cable '{neighbor.display_name}' has a disconnected end "
+                                f"(port '{port.name}' is floating)"
+                            )
                     anomalies.append(msg)
 
         # --- Future checks can be added here ---
@@ -147,7 +168,7 @@ class MeasureVoltage(Action):
                     v = last_result.voltage(port.node_id)
                     if v is not None:
                         record.add(f"voltage_{port.name}", round(v, 4), "V")
-        anomalies = _nearby_anomalies(comp, graph)
+        anomalies = _nearby_anomalies(comp, graph, context.extra.get("loose_component_ids"))
         if anomalies:
             record.add("nearby_anomalies", "; ".join(anomalies))
         anomaly_suffix = (" NEARBY ANOMALY: " + "; ".join(anomalies)) if anomalies else ""
@@ -779,7 +800,10 @@ class TestContinuity(Action):
             )
 
         r_now = params["resistance"]
-        r_nom = nominal.get("resistance", r_now)
+        # If the component has no nominal resistance (e.g. LED, Diode), assume it
+        # nominally conducts — use a low default so a 1 GΩ fault is never reported
+        # as "nominal" just because no reference value was found.
+        r_nom = nominal.get("resistance", 1.0)
         record.add("resistance_measured", round(r_now, 4), "Ω")
         record.add("resistance_nominal", round(r_nom, 4), "Ω")
 
@@ -796,7 +820,7 @@ class TestContinuity(Action):
 
         record.add("status", status)
 
-        anomalies = _nearby_anomalies(comp, graph)
+        anomalies = _nearby_anomalies(comp, graph, context.extra.get("loose_component_ids"))
         # A floating port on the component itself means one of its own cable ends
         # is disconnected. A technician probing the component would physically
         # notice this (dangling wire end), so it is surfaced as an anomaly.
@@ -1022,10 +1046,11 @@ class TestDiode(Action):
             status = "degraded"
 
         record.add("status", status)
-        return ActionResult(
-            observation=record,
-            message=f"{comp.display_name!r} diode test: {status} (Vf={vf_now:.3f} V, nominal={vf_nom:.3f} V).",
-        )
+        if status in ("open circuit", "shorted"):
+            msg = f"{comp.display_name!r} diode test: {status}."
+        else:
+            msg = f"{comp.display_name!r} diode test: {status} (Vf={vf_now:.3f} V, nominal={vf_nom:.3f} V)."
+        return ActionResult(observation=record, message=msg)
 
 
 class InspectConnections(Action):
@@ -1148,7 +1173,7 @@ class InspectConnections(Action):
             record.add("auto_opened_enclosures", "; ".join(auto_opened))
 
         summary = "; ".join(lines)
-        anomalies = _nearby_anomalies(comp, graph)
+        anomalies = _nearby_anomalies(comp, graph, context.extra.get("loose_component_ids"))
         if anomalies:
             record.add("nearby_anomalies", "; ".join(anomalies))
         anomaly_suffix = (" NEARBY ANOMALY: " + "; ".join(anomalies)) if anomalies else ""
