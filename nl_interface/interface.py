@@ -52,6 +52,10 @@ _DIAGNOSTIC_ALLOWED_ACTIONS: set[str] = {
     for name, cls in inspect.getmembers(diagnosable_systems_simulation.actions.diagnostic_actions, inspect.isclass)
     if hasattr(cls, "action_id") and cls.__module__ == diagnosable_systems_simulation.actions.diagnostic_actions.__name__
 }
+# Also add DisconnectCable and ReconnectCable which are legitimate diagnostic actions
+# (technicians need to disconnect/reconnect cables to test and diagnose, not just repair)
+_DIAGNOSTIC_ALLOWED_ACTIONS.add(DisconnectCable.action_id)
+_DIAGNOSTIC_ALLOWED_ACTIONS.add(ReconnectCable.action_id)
 
 
 
