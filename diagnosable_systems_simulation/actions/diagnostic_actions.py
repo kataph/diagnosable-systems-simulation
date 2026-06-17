@@ -1096,17 +1096,17 @@ class InspectConnections(Action):
                     except (KeyError, AttributeError):
                         pass
 
-        # Build node → [cable_display_name, ...] and node → [component_display_name, ...]
-        # indexes from the circuit graph.
-        node_cables:     dict[str, list[str]] = {}
+        # Build node → [(cable_display_name, port_name), ...] and node → [component_display_name, ...]
+        # indexes from the circuit graph. For cables, track which port is on each node.
+        node_cables:     dict[str, list[tuple[str, str]]] = {}
         node_components: dict[str, list[str]] = {}
         for edge in graph.get_netlist():
             if edge.component is comp:
                 continue
             is_cable = isinstance(edge.component, Cable)
-            for node_id in edge.port_nodes.values():
+            for port_name, node_id in edge.port_nodes.items():
                 if is_cable:
-                    node_cables.setdefault(node_id, []).append(edge.component.display_name)
+                    node_cables.setdefault(node_id, []).append((edge.component.display_name, port_name))
                 else:
                     node_components.setdefault(node_id, []).append(edge.component.display_name)
 
@@ -1119,7 +1119,7 @@ class InspectConnections(Action):
             else:
                 cables = node_cables.get(node_id, [])
                 if cables:
-                    conn_str = ", ".join(cables)
+                    conn_str = ", ".join(f"{cable} (port {cable_port})" for cable, cable_port in cables)
                 else:
                     neighbors = node_components.get(node_id, [])
                     conn_str = ("directly wired to " + ", ".join(neighbors)) if neighbors else "no cable"
