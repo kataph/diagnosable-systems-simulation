@@ -556,6 +556,9 @@ class OpenPeephole(Action):
 
     action_id = "open_peephole"
     description = "Open a peephole to observe internal components."
+    # 5.0s: Very short action; peephole is a small opening, less disruptive than
+    # inverting the whole enclosure (10s). Used for quick visual inspection without
+    # affecting internal component access (e.g., optical paths stay unblocked).
     cost = ActionCost(time=5.0)
 
     def check_preconditions(self, targets, context):
@@ -587,6 +590,8 @@ class ClosePeephole(Action):
 
     action_id = "close_peephole"
     description = "Close an open peephole."
+    # 5.0s: Very short action; closing a peephole is minimal effort, inverse of
+    # opening. Faster than full enclosure manipulation (10s).
     cost = ActionCost(time=5.0)
 
     def check_preconditions(self, targets, context):
@@ -619,6 +624,9 @@ class OpenInspectionPanel(Action):
 
     action_id = "open_inspection_panel"
     description = "Remove the inspection panel to access internal components for measurement."
+    # 5.0s: Very short action; removing a panel is minimal effort, less disruptive
+    # than rotating/inverting the enclosure (10s). Preferred over full enclosure
+    # manipulation when only targeted access is needed.
     cost = ActionCost(time=5.0)
 
     def check_preconditions(self, targets, context):
@@ -650,6 +658,8 @@ class CloseInspectionPanel(Action):
 
     action_id = "close_inspection_panel"
     description = "Replace the inspection panel."
+    # 5.0s: Very short action; replacing a panel is minimal effort, inverse of
+    # opening. Faster than full enclosure manipulation (10s).
     cost = ActionCost(time=5.0)
 
     def check_preconditions(self, targets, context):
