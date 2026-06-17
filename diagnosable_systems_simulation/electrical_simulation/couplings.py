@@ -13,10 +13,10 @@ class LooseConnectionCoupling(PhysicalCoupling):
     """
     Models an intermittent open circuit on a single cable port.
 
-    On each simulation step, the port is randomly disconnected with
-    probability *p* (default 0.5). When disconnected the port is
-    immediately reconnected before the next step so the simulation
-    can converge with either an open or closed connection.
+    Once per simulate() call, the coin is flipped: with probability *p*
+    (default 0.5) the port is disconnected for the entire solve; otherwise
+    it stays connected.  The state is held for all coupling-loop iterations
+    within that solve and restored at the start of the next simulate() call.
 
     The coupling also marks the system context so that callers know not
     to trust a single passing simulation when this fault is active.
@@ -28,11 +28,13 @@ class LooseConnectionCoupling(PhysicalCoupling):
         self.p = p
         self._currently_disconnected = False
         self._saved_node: Optional[int] = None
+        self._flipped_this_run = False
 
     def reset(self) -> None:
         """Return coupling to clean initial state (not mid-disconnect)."""
         self._currently_disconnected = False
         self._saved_node = None
+        self._flipped_this_run = False
 
     def apply(self, result: SimulationResult, graph: CircuitGraph, context: WorldContext) -> bool:
         context.extra["has_loose_connection"] = True
@@ -45,18 +47,23 @@ class LooseConnectionCoupling(PhysicalCoupling):
         if port is None:
             return False
 
-        if self._currently_disconnected:
-            if self._saved_node is not None:
-                graph.reconnect_port(self.component_id, self.port_name, self._saved_node)
-            self._currently_disconnected = False
-            self._saved_node = None
-            return True
-        else:
+        if not self._flipped_this_run:
+            # First iteration of this simulate() call: flip the coin once.
+            self._flipped_this_run = True
+            if self._currently_disconnected:
+                # Previous simulate() left the port open — restore it now.
+                if self._saved_node is not None:
+                    graph.reconnect_port(self.component_id, self.port_name, self._saved_node)
+                self._currently_disconnected = False
+                self._saved_node = None
             if random.random() < self.p and port.is_connected():
                 self._saved_node = port.node_id
                 graph.disconnect_port(self.component_id, self.port_name)
                 self._currently_disconnected = True
                 return True
+            return False
+        else:
+            # Subsequent iterations within the same simulate() call: hold state.
             return False
 
 
@@ -66,7 +73,25 @@ def _add_loose_connection(
     port_name: str,
     p: float = 0.5,
 ) -> None:
-    """Attach a LooseConnectionCoupling to a DiagnosableSystem and flag the context."""
+    """Attach a LooseConnectionCoupling to a DiagnosableSystem and flag the context.
+
+    Also stores the original port connection in _orig_connections so that test_repair()
+    can restore the port when the loose connection fault is repaired.
+    """
+    if component_id not in sys.all_components():
+        return
+
+    comp = sys.component(component_id)
+    port = next((p for p in comp.ports if p.name == port_name), None)
+    if port is None:
+        return
+
+    # Store original connection for repair
+    if not hasattr(comp, '_orig_connections'):
+        comp._orig_connections = {}
+    comp._orig_connections[port_name] = port.node_id
+
+    # Add the coupling
     coupling = LooseConnectionCoupling(component_id, port_name, p=p)
     sys._runner.couplings.append(coupling)
     sys.context.extra["has_loose_connection"] = True
