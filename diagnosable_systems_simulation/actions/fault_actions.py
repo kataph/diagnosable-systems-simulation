@@ -64,7 +64,12 @@ class DisconnectCable(Action):
                     )
                     peer.affordances.add(Affordance.RECONNECTABLE)
         # Save original connections on the cable and physically disconnect.
-        cable._orig_connections = dict(port_nodes)
+        # Use setdefault so that _orig_connections saved by _add_loose_connection
+        # (for a port that is already floating) is not overwritten with an empty entry.
+        if not hasattr(cable, '_orig_connections'):
+            cable._orig_connections = {}
+        for port_name, node_id in port_nodes.items():
+            cable._orig_connections.setdefault(port_name, node_id)
         disconnected = [
             p for p in ports
             if port_nodes.get(p) is not None
@@ -118,31 +123,42 @@ class ReconnectCable(Action):
                 ),
             )
         for cable_port_name, node_id in connections.items():
+            # The original node this port was disconnected from (may differ from
+            # node_id when SwapCablePolarities reconnects to a different node).
+            orig_node_id = getattr(cable, "_orig_connections", {}).get(cable_port_name, node_id)
             graph.reconnect_port(cable.component_id, cable_port_name, node_id)
-            # removes disconnected state change from neightbouring components
+            # removes disconnected state change from neighbouring components.
+            # We match on orig_node_id (the node the port was on before
+            # DisconnectCable ran) because that is what peer._detached_cable_ports
+            # recorded — not the new node_id after a polarity swap.
             for edge in graph.get_netlist():
                 if edge.component_id == cable.component_id:
                     continue
-                for peer_port_name, peer_node_id in edge.port_nodes.items():
-                    if peer_node_id != node_id:
-                        continue
-                    peer = edge.component
-                    if not hasattr(peer, "_detached_cable_ports"):
-                        continue
+                peer = edge.component
+                if not hasattr(peer, "_detached_cable_ports"):
+                    continue
 
-                    to_delete = []
-                    for p_port, (cid, c_port, nid) in peer._detached_cable_ports.items():
-                        if cid == cable.component_id and nid == node_id:
-                            # This was the entry created by DisconnectCable
-                            to_delete.append(p_port)
-                    for p_port in to_delete:
-                        del peer._detached_cable_ports[p_port]
+                to_delete = []
+                for p_port, (cid, c_port, nid) in peer._detached_cable_ports.items():
+                    if cid == cable.component_id and nid == orig_node_id:
+                        # This was the entry created by DisconnectCable
+                        to_delete.append(p_port)
+                for p_port in to_delete:
+                    del peer._detached_cable_ports[p_port]
 
-                    if not peer._detached_cable_ports:
-                        peer.affordances.remove(Affordance.RECONNECTABLE)
-                        # Optional: remove the empty attribute to keep objects clean
-                        del peer._detached_cable_ports
+                if not peer._detached_cable_ports:
+                    peer.affordances.remove(Affordance.RECONNECTABLE)
+                    del peer._detached_cable_ports
                   
+        # Remove any LooseConnectionCoupling on this cable so the fault doesn't
+        # re-disconnect the port on the next simulate() call.
+        from diagnosable_systems_simulation.electrical_simulation.couplings import LooseConnectionCoupling
+        system = context.extra.get("_system")
+        if system is not None and hasattr(system, '_runner'):
+            system._runner.couplings = [
+                c for c in system._runner.couplings
+                if not (isinstance(c, LooseConnectionCoupling) and c.component_id == cable.component_id)
+            ]
         cable.affordances.remove(Affordance.RECONNECTABLE)
         cable.affordances.add(Affordance.DETACHABLE)
         return ActionResult(message=f"Reconnected {cable.display_name!r} to original position.")

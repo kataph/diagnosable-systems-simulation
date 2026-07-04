@@ -661,7 +661,7 @@ def create_ambient_ctrl_module(prefix: str = "ctrl") -> SimpleNamespace:
         enclosure_id=f"cube_{prefix}",
     )
     light_sensor.affordances = AffordanceSet(
-        static={Affordance.OBSERVABLE, Affordance.MEASURABLE, Affordance.REPLACEABLE},
+        static={Affordance.OBSERVABLE, Affordance.MEASURABLE, Affordance.REPLACEABLE, Affordance.COVERABLE},
         conditional=[
             ConditionalAffordance(
                 Affordance.REACHABLE, _panel_or_inverted,

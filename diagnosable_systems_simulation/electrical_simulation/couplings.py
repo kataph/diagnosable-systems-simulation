@@ -6,6 +6,7 @@ from typing import Optional
 from diagnosable_systems_simulation.electrical_simulation.circuit import CircuitGraph
 from diagnosable_systems_simulation.electrical_simulation.results import SimulationResult
 from diagnosable_systems_simulation.electrical_simulation.solver import PhysicalCoupling
+from diagnosable_systems_simulation.world.affordances import Affordance
 from diagnosable_systems_simulation.world.context import WorldContext
 
 
@@ -90,6 +91,7 @@ def _add_loose_connection(
     if not hasattr(comp, '_orig_connections'):
         comp._orig_connections = {}
     comp._orig_connections[port_name] = port.node_id
+    comp.affordances.add(Affordance.RECONNECTABLE)
 
     # Add the coupling
     coupling = LooseConnectionCoupling(component_id, port_name, p=p)

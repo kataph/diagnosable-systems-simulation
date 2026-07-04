@@ -21,6 +21,7 @@ class Affordance(Enum):
     OPENABLE      = auto()  # enclosure or access port can be opened (requires REACHABLE)
     CLOSEABLE     = auto()  # enclosure or access port can be closed (requires REACHABLE)
     TOGGLABLE     = auto()  # switch state can be flipped (requires REACHABLE)
+    COVERABLE     = auto()  # can be covered with an opaque material to block light (requires REACHABLE)
 
 
 @dataclass(frozen=True)

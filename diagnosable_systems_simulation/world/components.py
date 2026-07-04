@@ -211,6 +211,10 @@ class Bulb(Component):
         self.resistance = resistance
         self.power_threshold = power_threshold
         self.is_indicator = is_indicator
+        self.is_covered: bool = False
+        static_affordances = {Affordance.MEASURABLE, Affordance.OBSERVABLE, Affordance.REPLACEABLE}
+        if not is_indicator:
+            static_affordances.add(Affordance.COVERABLE)
         super().__init__(
             component_id=component_id,
             display_name=display_name,
@@ -218,9 +222,7 @@ class Bulb(Component):
                 ElectricalPort("p", PortRole.POSITIVE),
                 ElectricalPort("n", PortRole.NEGATIVE),
             ],
-            affordances=AffordanceSet(
-                static={Affordance.MEASURABLE, Affordance.OBSERVABLE, Affordance.REPLACEABLE}
-            ),
+            affordances=AffordanceSet(static=static_affordances),
             position=position,
             enclosure_id=enclosure_id,
         )
@@ -423,6 +425,7 @@ class LightSensor(Component):
         self.resistance_lit = resistance_lit
         # Live state updated by the coupling loop
         self._current_resistance: float = resistance_dark
+        self.is_covered: bool = False
         super().__init__(
             component_id=component_id,
             display_name=display_name,
@@ -431,7 +434,7 @@ class LightSensor(Component):
                 ElectricalPort("n", PortRole.NEGATIVE),
             ],
             affordances=AffordanceSet(
-                static={Affordance.MEASURABLE, Affordance.REPLACEABLE}
+                static={Affordance.MEASURABLE, Affordance.REPLACEABLE, Affordance.COVERABLE}
             ),
             position=position,
             enclosure_id=enclosure_id,

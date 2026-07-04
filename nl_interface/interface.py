@@ -38,6 +38,7 @@ from diagnosable_systems_simulation.actions.diagnostic_actions import (
     RestoreEnclosure, RotateEnclosure, ShortPorts, TestContinuity,
     DetachSequenceOfControlModulesAndAttachItToPowerAndLoad,
     TestDiode, TestPathContinuity, VerifyRepair,
+    CoverComponent, UncoverComponent,
 )
 from diagnosable_systems_simulation.actions.fault_actions import (
     DegradeComponent, DisconnectCable, ForceSwitch, ReconnectCable,
@@ -88,6 +89,8 @@ _REGISTRY: dict[str, tuple] = {
     "invert_enclosure":    (InvertEnclosure,    {}),
     "restore_enclosure":   (RestoreEnclosure,   {}),
     "rotate_enclosure":    (RotateEnclosure,    {}),
+    "cover_component":     (CoverComponent,     {}),
+    "uncover_component":   (UncoverComponent,   {}),
     "open_peephole":           (OpenPeephole,           {}),
     "close_peephole":          (ClosePeephole,          {}),
     "open_inspection_panel":   (OpenInspectionPanel,   {}),
@@ -141,16 +144,17 @@ class TextClient:
     def create(self, model, system_prompt: str, user_prompt: str, max_output_tokens: int) -> str:
         match self.backend:
             case "openai":
-                return self._client.responses.create(
+                return self._client.chat.completions.create(
                     model=model,
-                    max_output_tokens=max_output_tokens,
+                    max_tokens=max_output_tokens,
                     temperature=_TEMPERATURE,
                     top_p=_TOP_P,
-                    input=[
+                    seed=_SEED,
+                    messages=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt},
                     ],
-                ).output_text.strip()
+                ).choices[0].message.content.strip()
             case "anthropic":
                 return self._client.messages.create(
                     model=model,
@@ -183,7 +187,16 @@ def _action_menu(registry: "dict | None" = None) -> str:
 def _component_menu(system: DiagnosableSystem) -> str:
     from diagnosable_systems_simulation.world.knowledge_graph import EntityType
     lines = []
-    
+
+    # Collect shielding enclosure IDs — these are PhysicalEnclosure objects referenced
+    # by couplings (e.g. AmbientFeedbackCoupling) as optical-path shields.
+    # Only present in systems that have such couplings (e.g. ALS system).
+    shielding_ids = {
+        enc.component_id
+        for coupling in getattr(system._runner, "couplings", [])
+        for enc in getattr(coupling, "shielding_enclosures", [])
+    }
+
     # NEW: List Aggregates/Modules first so the LLM understands the hierarchy
     lines.append("Aggregates (Modules):")
     for cid, c in system.all_components().items():
@@ -191,14 +204,17 @@ def _component_menu(system: DiagnosableSystem) -> str:
             # Fetch children to show the LLM what is inside
             parts = [p.component_id for p in system.parts_of_module(cid)]
             lines.append(f"- {cid}: {c.display_name} (Components that are part of the module: {', '.join(parts)})")
-    
-    
+
     lines.append("\nIndividual Components:")
     for cid, c in system.kg.entities_of_type(EntityType.COMPONENT).items():
         enclosure_id = getattr(c, "enclosure_id", None)
         enclosure_note = f" [inside enclosure: {enclosure_id}]" if enclosure_id else ""
         nominal_note = getattr(c, "_nominal_observation_note", None)
         nominal_suffix = f" [NOTE: {nominal_note}]" if nominal_note else ""
+        # Shielding enclosures get an explicit label so the NL mapper prefers them
+        # over module aggregates when the hypothesis mentions "box" / "enclosure" / "casing".
+        if cid in shielding_ids:
+            nominal_suffix += " [physical box/enclosure — reposition/rotate to break optical feedback]"
         lines.append(f"- {cid}: {c.display_name}{enclosure_note}{nominal_suffix}")
     # Physically removed components are still listed without any special label so
     # the parser LLM maps to them normally. The execution layer intercepts the ID

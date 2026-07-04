@@ -123,9 +123,20 @@ class AmbientFeedbackCoupling(PhysicalCoupling):
         self.coupling_radius = coupling_radius
         self.shielding_enclosures = shielding_enclosures
 
-    def _feedback_blocked(self) -> bool:
-        """Return True if any shielding enclosure has been rotated/moved."""
-        return any(enc.is_rotated for enc in self.shielding_enclosures)
+    def _feedback_blocked(self, graph: "CircuitGraph") -> bool:
+        """Return True if the optical path is broken by any shielding action."""
+        if any(enc.is_rotated for enc in self.shielding_enclosures):
+            return True
+        # Covering the sensor or the lamp directly also breaks the path.
+        if graph.has_component(self.sensor_id):
+            sensor = graph.get_component(self.sensor_id)
+            if getattr(sensor, "is_covered", False):
+                return True
+        if graph.has_component(self.lamp_id):
+            lamp = graph.get_component(self.lamp_id)
+            if getattr(lamp, "is_covered", False):
+                return True
+        return False
 
     def apply(
         self,
@@ -149,7 +160,7 @@ class AmbientFeedbackCoupling(PhysicalCoupling):
         # 1. Lamp → sensor: does the lamp illuminate the sensor?
         lamp_illuminates = (
             feedback_active
-            and not self._feedback_blocked()
+            and not self._feedback_blocked(graph)
             and result.is_lit(self.lamp_id)
             and self.lamp_pos.is_within(self.sensor_pos, self.coupling_radius)
         )

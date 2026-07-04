@@ -21,6 +21,7 @@ from diagnosable_systems_simulation.systems.ten_cubes.factory import build_ten_c
 from diagnosable_systems_simulation.actions.diagnostic_actions import CloseSwitch, InvertEnclosure, MeasureVoltage, ObserveComponent, OpenSwitch, ReplaceComponent, TestContinuity, TestControlSubchain, TestPathContinuity
 from diagnosable_systems_simulation.actions.fault_actions import (
     DegradeComponent, DisconnectCable, ForceSwitch, ReconnectCable, ShortCircuit,
+    SwapCablePolarities,
 )
 
 
@@ -963,6 +964,82 @@ class TestLooseConnectionRepairPaths:
         from diagnosable_systems_simulation.world.affordances import Affordance
         assert Affordance.RECONNECTABLE not in neighbour.affordances.all_active(neighbour, s.context), \
             "RECONNECTABLE must be cleared from neighbour after replace"
+
+
+class TestReconnectCableAfterSwap:
+    """ReconnectCable must clean up RECONNECTABLE on neighbours even when the
+    cable is reconnected to a *different* node than it was disconnected from
+    (as happens inside SwapCablePolarities)."""
+
+    def test_swap_does_not_mark_psu_cables_reconnectable(self, backend):
+        """After SwapCablePolarities, neighbouring PSU cables must NOT get RECONNECTABLE."""
+        from diagnosable_systems_simulation.world.affordances import Affordance
+        from diagnosable_systems_simulation.world.components import Cable
+        s = _fresh_cs(backend)
+        s.inject_fault(
+            SwapCablePolarities(port_name="p"),
+            {"cable_a": s.component("ctrl_cable_in_pos"),
+             "cable_b": s.component("ctrl_cable_in_neg")},
+        )
+        for cid in ("psu_cable_pos", "psu_cable_neg"):
+            c = s.component(cid)
+            assert Affordance.RECONNECTABLE not in c.affordances.all_active(c, s.context), \
+                f"{cid} must NOT be RECONNECTABLE after swap — it was not disconnected"
+
+    def test_swap_marks_swapped_cables_wrong_node(self, backend):
+        """After SwapCablePolarities, the two swapped cables must be detectable via wrong_node."""
+        from diagnosable_systems_simulation.world.components import Cable
+        s = _fresh_cs(backend)
+        s.inject_fault(
+            SwapCablePolarities(port_name="p"),
+            {"cable_a": s.component("ctrl_cable_in_pos"),
+             "cable_b": s.component("ctrl_cable_in_neg")},
+        )
+        def _is_wrong_node(comp):
+            if not isinstance(comp, Cable):
+                return False
+            orig = getattr(comp, "_orig_connections", {})
+            return any(
+                p.is_connected() and orig.get(p.name) is not None and p.node_id != orig[p.name]
+                for p in comp.ports
+            )
+        assert _is_wrong_node(s.component("ctrl_cable_in_pos")), \
+            "ctrl_cable_in_pos must be wrong_node after swap"
+        assert _is_wrong_node(s.component("ctrl_cable_in_neg")), \
+            "ctrl_cable_in_neg must be wrong_node after swap"
+
+    def test_swap_candidate_psu_cables_gives_wrong_not_partial(self, backend):
+        """Verifying PSU cables as candidates must return WRONG (lamp stays off), not partial.
+
+        Before the ReconnectCable fix, psu_cable_* appeared in still_broken_ids due to
+        a spurious RECONNECTABLE affordance, causing a false PARTIAL outcome.
+        """
+        from diagnosable_systems_simulation.world.affordances import Affordance
+        from diagnosable_systems_simulation.world.components import Cable
+        s = _fresh_cs(backend)
+        s.inject_fault(
+            SwapCablePolarities(port_name="p"),
+            {"cable_a": s.component("ctrl_cable_in_pos"),
+             "cable_b": s.component("ctrl_cable_in_neg")},
+        )
+        s._fault_snapshot = s.snapshot()
+        # PSU cables are not faulted — repairing them must not fix the lamp
+        lamp_on = s.test_repair({"psu_cable_pos", "psu_cable_neg"})
+        assert not lamp_on, \
+            "repairing PSU cables must NOT restore lamp — they are not the fault"
+
+    def test_swap_correct_cables_restores_lamp(self, backend):
+        """Repairing the actually-swapped cables fully restores nominal state."""
+        s = _fresh_cs(backend)
+        s.inject_fault(
+            SwapCablePolarities(port_name="p"),
+            {"cable_a": s.component("ctrl_cable_in_pos"),
+             "cable_b": s.component("ctrl_cable_in_neg")},
+        )
+        s._fault_snapshot = s.snapshot()
+        lamp_on = s.test_repair({"ctrl_cable_in_pos", "ctrl_cable_in_neg"})
+        assert lamp_on, \
+            "repairing the swapped cables must restore the lamp"
 
 
 if __name__ == "__main__":

@@ -112,7 +112,7 @@ def observe_component(
 
         # Type-specific visual properties
         from diagnosable_systems_simulation.world.components import (
-            Cable, Switch, LED, Bulb, Fuse, Potentiometer
+            Cable, Switch, LED, Bulb, Fuse, Potentiometer, LightSensor
         )
         if isinstance(component, Switch):
             # Use current_parameters() so that fault overlays (e.g. a stuck relay)
@@ -125,6 +125,11 @@ def observe_component(
         if isinstance(component, Bulb):
             if result is not None:
                 record.add("is_lit", result.is_lit(component.component_id))
+            if component.is_covered:
+                record.add("is_covered", True)
+        if isinstance(component, LightSensor):
+            if component.is_covered:
+                record.add("is_covered", True)
         if isinstance(component, Fuse):
             record.add("is_blown", component.is_blown)
         if isinstance(component, Potentiometer):

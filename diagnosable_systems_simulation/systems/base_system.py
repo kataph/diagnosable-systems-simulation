@@ -267,7 +267,7 @@ class DiagnosableSystem:
     # ------------------------------------------------------------------
 
     # Component attributes that hold mutable non-overlay state.
-    _STATEFUL_ATTRS: tuple[str, ...] = ("is_closed", "is_inverted", "is_rotated", "is_open", "is_blown")
+    _STATEFUL_ATTRS: tuple[str, ...] = ("is_closed", "is_inverted", "is_rotated", "is_open", "is_blown", "is_covered")
 
     def snapshot(self) -> dict:
         """

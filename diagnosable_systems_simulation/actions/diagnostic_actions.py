@@ -546,6 +546,9 @@ class RotateEnclosure(Action):
     action_id = "rotate_enclosure"
     description = "Rotate or move an enclosure to reposition it (e.g. break a line-of-sight coupling)."
     cost = ActionCost(time=10.0)
+    # Rotation changes is_rotated which couplings (e.g. AmbientFeedbackCoupling) read
+    # during simulation — must re-simulate so last_result reflects the new state.
+    mutates_graph: bool = True
 
     def check_preconditions(self, targets, context):
         ok, failures = PreconditionChecker.check_all(
@@ -562,6 +565,84 @@ class RotateEnclosure(Action):
         enc: PhysicalEnclosure = targets["subject"]
         enc.is_rotated = True
         return ActionResult(message=f"Enclosure {enc.display_name!r} has been rotated/moved to a new position.")
+
+
+class CoverComponent(Action):
+    """
+    Cover a component with an opaque material (tape, cardboard, hood) to
+    block all light from reaching it or leaving it.
+
+    For a ``LightSensor``: blocks incoming light so the sensor stays in its
+    dark (high-resistance) state regardless of any illumination source.
+    For a ``Bulb`` (non-indicator): blocks outgoing light so the bulb cannot
+    illuminate nearby sensors even when it is powered on.
+
+    In both cases the ``AmbientFeedbackCoupling`` interprets ``is_covered=True``
+    as the optical path being broken and stops the feedback loop.  The cover
+    is permanent until explicitly removed with ``UncoverComponent``.
+
+    Requires REACHABLE and COVERABLE affordance on the target.
+
+    targets: {"subject": <LightSensor or Bulb>}
+    """
+
+    action_id = "cover_component"
+    description = "Cover a light-sensitive component or light source with an opaque material to block its optical path."
+    cost = ActionCost(time=10.0)
+    mutates_graph: bool = True
+
+    def check_preconditions(self, targets, context):
+        ok, failures = PreconditionChecker.check_all(
+            [
+                AffordanceRequirement("subject", Affordance.REACHABLE),
+                AffordanceRequirement("subject", Affordance.COVERABLE),
+            ],
+            targets, context,
+        )
+        return ok, "; ".join(failures)
+
+    def execute(self, targets, graph, context, last_result):
+        comp = targets["subject"]
+        comp.is_covered = True
+        return ActionResult(
+            message=f"{comp.display_name!r} has been covered with an opaque material. Its optical path is now blocked."
+        )
+
+
+class UncoverComponent(Action):
+    """
+    Remove the opaque cover from a previously covered component.
+
+    Restores normal optical behaviour: the light sensor can again be
+    illuminated by nearby sources, and a covered bulb can again illuminate
+    nearby sensors.
+
+    Requires REACHABLE and COVERABLE affordance on the target.
+
+    targets: {"subject": <LightSensor or Bulb>}
+    """
+
+    action_id = "uncover_component"
+    description = "Remove the opaque cover from a component to restore its optical path."
+    cost = ActionCost(time=10.0)
+    mutates_graph: bool = True
+
+    def check_preconditions(self, targets, context):
+        ok, failures = PreconditionChecker.check_all(
+            [
+                AffordanceRequirement("subject", Affordance.REACHABLE),
+                AffordanceRequirement("subject", Affordance.COVERABLE),
+            ],
+            targets, context,
+        )
+        return ok, "; ".join(failures)
+
+    def execute(self, targets, graph, context, last_result):
+        comp = targets["subject"]
+        comp.is_covered = False
+        return ActionResult(
+            message=f"The opaque cover has been removed from {comp.display_name!r}. Its optical path is restored."
+        )
 
 
 class OpenPeephole(Action):
@@ -1627,6 +1708,7 @@ __all__ = [
     'ObserveComponent', 'MeasureVoltage', 'MeasureCurrent',
     'OpenSwitch', 'CloseSwitch', 'TestSwitch',
     'ReplaceComponent', 'InvertEnclosure', 'RestoreEnclosure', 'RotateEnclosure',
+    'CoverComponent', 'UncoverComponent',
     'OpenPeephole', 'ClosePeephole', 'OpenInspectionPanel', 'CloseInspectionPanel',
     'AdjustPotentiometer', 'TestContinuity', 'TestPathContinuity', 'TestDiode',
     'InspectConnections', 'VerifyRepair', 'SwapCablePolarities', 'ReverseBattery',
